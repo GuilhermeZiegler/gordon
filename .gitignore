@@ -1,0 +1,35 @@
+# Ambiente virtual
+.venv/
+env/
+venv/
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Arquivos de configuração locais
+config.json
+
+# Dados gerados pelo app
+*.pkl
+
+# Logs
+*.log
+
+# Arquivos temporários
+*.tmp
+*.bak
+*.swp
+
+# Diretórios de build
+build/
+dist/
+*.egg-info/
+
+# Streamlit cache
+.streamlit/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
