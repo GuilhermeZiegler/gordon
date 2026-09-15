@@ -44,8 +44,11 @@ def popular_dados():
     with open(_c["ficha"], 'wb') as f:
         pickle.dump(pd.DataFrame(fichas), f)
 
+    from components.auth import ADMIN_FIXO
+    funcionarios_completos = [ADMIN_FIXO.copy()] + [f.copy() for f in FUNCIONARIOS]
+
     with open(os.path.join(DATA_DIR, "funcionarios.pkl"), 'wb') as f:
-        pickle.dump(FUNCIONARIOS, f)
+        pickle.dump(funcionarios_completos, f)
 
     with open(os.path.join(DATA_DIR, "clientes.pkl"), 'wb') as f:
         pickle.dump(CLIENTES, f)

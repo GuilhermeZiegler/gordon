@@ -16,7 +16,11 @@ from utils.caixa_utils import (
     garantir_estrutura_caixa,
     obter_caixa_aberto,
     atualizar_historico_caixa,
-    registrar_venda_no_caixa
+    registrar_venda_no_caixa,
+    calcular_saldo_caixa,
+    listar_vendas_estornaveis,
+    calcular_estornado_venda,
+    registrar_estorno,
 )
 
 from utils.agendamentos_utils import (
@@ -75,7 +79,6 @@ if not caixa_aberto:
                 "vendas_delivery": 0.0,
                 "vendas_takeaway": 0.0,
                 "reembolso": 0.0,
-                "estorno": 0.0,
                 "pagamentos": [],
                 "entradas": [],
                 "saidas": [],
@@ -84,7 +87,8 @@ if not caixa_aberto:
                     caixa_existente.get("fiados", [])
                     if caixa_existente
                     else []
-                )
+                ),
+                "estornos": []
             }
 
             salvar_caixa(novo_caixa)
@@ -108,30 +112,6 @@ else:
         st.session_state.caixa_atual = caixa
 
     caixa = garantir_estrutura_caixa(caixa)
-
-    total_entradas = sum(
-        e.get("valor", 0)
-        for e in caixa["entradas"]
-    )
-
-    total_saidas = (
-        caixa["reembolso"]
-        + caixa["estorno"]
-        + sum(
-            p.get("valor", 0)
-            for p in caixa["pagamentos"]
-        )
-        + sum(
-            s.get("valor", 0)
-            for s in caixa["saidas"]
-        )
-    )
-
-    saldo_final = (
-        caixa["saldo_inicial"]
-        + total_entradas
-        - total_saidas
-    )
 
     aba_resumo, aba_vendas, aba_movimentacoes, aba_fiados = st.tabs(
         [
@@ -167,10 +147,22 @@ else:
                 if e.get("metodo") in ["Dinheiro", "Voucher"]
             )
 
-            total_saidas_especie = sum(
-                p.get("valor", 0)
-                for p in caixa["pagamentos"]
-                if p.get("metodo") in ["Dinheiro", "Voucher"]
+            total_saidas_especie = (
+                sum(
+                    e.get("valor_estornado", 0)
+                    for e in caixa.get("estornos", [])
+                    if e.get("metodo") in ["Dinheiro", "Voucher"]
+                )
+                + sum(
+                    p.get("valor", 0)
+                    for p in caixa["pagamentos"]
+                    if p.get("metodo") in ["Dinheiro", "Voucher"]
+                )
+                + sum(
+                    s.get("valor", 0)
+                    for s in caixa["saidas"]
+                    if s.get("metodo") in ["Dinheiro", "Voucher"]
+                )
             )
 
             saldo_esperado_especie = (
@@ -220,12 +212,12 @@ else:
                         "vendas_delivery": 0.0,
                         "vendas_takeaway": 0.0,
                         "reembolso": 0.0,
-                        "estorno": 0.0,
                         "pagamentos": [],
                         "entradas": [],
                         "saidas": [],
                         "vendas_metodo": {},
-                        "fiados": fiados_ativos
+                        "fiados": fiados_ativos,
+                        "estornos": []
                     }
 
                     salvar_caixa(novo_caixa)
@@ -556,16 +548,52 @@ else:
 
             df_vendas = pd.DataFrame(vendas)
 
+            colunas_vendas = [
+                c for c in [
+                    "id_venda",
+                    "categoria",
+                    "valor",
+                    "metodo",
+                    "descricao",
+                    "data"
+                ] if c in df_vendas.columns
+            ]
+
+            df_vendas = df_vendas[colunas_vendas].copy()
+
+            if "id_venda" in df_vendas.columns:
+                df_vendas["estornado"] = df_vendas["id_venda"].apply(
+                    calcular_estornado_venda
+                )
+                df_vendas["disponivel"] = (
+                    pd.to_numeric(df_vendas["valor"], errors="coerce").fillna(0)
+                    - df_vendas["estornado"]
+                )
+            else:
+                df_vendas["estornado"] = 0.0
+                df_vendas["disponivel"] = df_vendas["valor"]
+
             st.dataframe(
-                df_vendas[
-                    [
-                        "categoria",
-                        "valor",
-                        "metodo",
-                        "descricao",
-                        "data"
-                    ]
-                ],
+                df_vendas,
+                column_config={
+                    "id_venda": "ID",
+                    "categoria": "Categoria",
+                    "valor": st.column_config.NumberColumn(
+                        "Valor",
+                        format="R$ %.2f"
+                    ),
+                    "metodo": "Método",
+                    "descricao": "Descrição",
+                    "data": "Data",
+                    "estornado": st.column_config.NumberColumn(
+                        "Estornado",
+                        format="R$ %.2f"
+                    ),
+                    "disponivel": st.column_config.NumberColumn(
+                        "Disponível",
+                        format="R$ %.2f"
+                    ),
+                },
                 use_container_width=True,
                 hide_index=True
             )
@@ -576,300 +604,513 @@ else:
 
     with aba_movimentacoes:
 
-        sub_mov, sub_agd = st.tabs(["📝 Movimentações", "📅 Agendamentos"])
+        tipo_movimentacao = st.selectbox(
+            "Tipo de Movimentação:",
+            ["Entrada", "Saída", "Reembolso", "Pagamento", "Estorno"],
+            key="tipo_movimentacao_select"
+        )
 
-        with sub_mov:
-            with st.form("form_movimentacao"):
+        if tipo_movimentacao == "Estorno":
 
-                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+            st.subheader("↩️ Estornar Venda")
 
-                with col1:
-                    descricao = st.text_input(
-                        "Descrição:",
-                        placeholder="Ex: Pagamento fornecedor, Troco..."
-                    )
+            periodo_estorno = st.selectbox(
+                "Período:",
+                [
+                    "Hoje",
+                    "Últimos 7 dias",
+                    "Últimos 30 dias",
+                    "Últimos 90 dias",
+                    "Tudo"
+                ],
+                index=1,
+                key="periodo_estorno_select"
+            )
 
-                with col2:
-                    tipo = st.selectbox(
-                        "Tipo:",
-                        ["Entrada", "Saída", "Reembolso", "Estorno", "Pagamento"]
-                    )
+            vendas_estornaveis = listar_vendas_estornaveis(periodo_estorno)
 
-                with col3:
-                    valor = st.number_input(
-                        "Valor (R$):",
-                        min_value=0.01,
-                        step=0.01
-                    )
+            vendas_com_disponivel = []
+            for v in vendas_estornaveis:
+                ja_estornado = calcular_estornado_venda(v["id_venda"])
+                disponivel = round(v["valor"] - ja_estornado, 2)
+                if disponivel > 0:
+                    vendas_com_disponivel.append({
+                        **v,
+                        "ja_estornado": ja_estornado,
+                        "disponivel": disponivel,
+                    })
 
-                with col4:
-                    metodo_mov = st.selectbox(
-                        "Pagamento:",
-                        ["Pix", "Débito", "Crédito", "Dinheiro", "Voucher"],
-                        key="metodo_movimentacao"
-                    )
+            if not vendas_com_disponivel:
 
-                funcionario_pagamento = None
+                st.info("Nenhuma venda disponível para estorno.")
 
-                if tipo == "Pagamento":
-                    funcionarios = st.session_state.get("funcionarios", [])
-                    nomes_funcionarios = [f.get("nome", "") for f in funcionarios]
-                    funcionario_pagamento = st.selectbox("Funcionário:", nomes_funcionarios)
+            else:
 
-                if st.form_submit_button("➕ Registrar", use_container_width=True):
-                    if tipo == "Entrada":
-                        caixa["entradas"].append({
-                            "categoria": "Manual",
-                            "descricao": descricao,
-                            "valor": valor,
-                            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                            "metodo": metodo_mov
-                        })
-                    elif tipo == "Saída":
-                        caixa["saidas"].append({
-                            "descricao": descricao,
-                            "valor": valor,
-                            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                            "metodo": metodo_mov
-                        })
-                    elif tipo == "Reembolso":
-                        caixa["reembolso"] += valor
-                    elif tipo == "Estorno":
-                        caixa["estorno"] += valor
-                    elif tipo == "Pagamento":
-                        caixa["pagamentos"].append({
-                            "funcionario": funcionario_pagamento,
-                            "valor": valor,
-                            "descricao": descricao,
-                            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                            "metodo": metodo_mov
-                        })
+                opcoes = {
+                    f"{v['id_venda']} — {v['categoria']} — "
+                    f"R$ {v['valor']:.2f} — {v['metodo']} — "
+                    f"{v['data']} — Disp: R$ {v['disponivel']:.2f}": v
+                    for v in vendas_com_disponivel
+                }
 
-                    atualizar_historico_caixa(caixa)
-                    salvar_caixa(caixa)
-                    st.session_state.caixa_atual = caixa
-
-                    st.success(f"✅ {tipo} registrada!")
-                    time.sleep(0.5)
-                    st.rerun()
-
-            st.divider()
-
-            col_entradas, col_saidas = st.columns(2)
-
-            with col_entradas:
-                st.subheader("📥 Entradas")
-                entradas_manuais = [e for e in caixa["entradas"] if e.get("categoria") == "Manual"]
-                if entradas_manuais:
-                    st.dataframe(pd.DataFrame(entradas_manuais), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Nenhuma entrada manual registrada.")
-
-            with col_saidas:
-                st.subheader("📤 Saídas")
-                if caixa["saidas"]:
-                    st.dataframe(pd.DataFrame(caixa["saidas"]), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Nenhuma saída registrada.")
-
-        with sub_agd:
-            with st.expander("📤 Importar Agendamentos via Excel"):
-                st.markdown("**Formato esperado:**")
-                st.code("descricao | valor | data_vencimento | categoria | fornecedor (opc) | metodo_pagamento (opc) | recorrente (opc: sim/nao) | periodicidade (opc) | observacao (opc)")
-
-                arquivo_excel = st.file_uploader(
-                    "Envie o arquivo Excel (.xlsx)",
-                    type=['xlsx'],
-                    key="upload_agendamentos_excel"
+                selecionada_label = st.selectbox(
+                    "Selecione a venda:",
+                    list(opcoes.keys()),
+                    key="estorno_venda_select"
                 )
 
-                if arquivo_excel:
-                    try:
-                        df_upload = pd.read_excel(arquivo_excel)
-                        st.write(f"📄 {len(df_upload)} registros encontrados")
+                venda = opcoes[selecionada_label]
 
-                        obrigatorias = ['descricao', 'valor', 'data_vencimento', 'categoria']
-                        ausentes = [c for c in obrigatorias if c not in df_upload.columns]
+                col_info1, col_info2, col_info3 = st.columns(3)
 
-                        if ausentes:
-                            st.error(f"❌ Colunas obrigatórias faltando: {', '.join(ausentes)}")
+                with col_info1:
+                    st.metric(
+                        "Valor Original",
+                        f"R$ {venda['valor']:.2f}"
+                    )
+
+                with col_info2:
+                    st.metric(
+                        "Já Estornado",
+                        f"R$ {venda['ja_estornado']:.2f}"
+                    )
+
+                with col_info3:
+                    st.metric(
+                        "Disponível",
+                        f"R$ {venda['disponivel']:.2f}"
+                    )
+
+                st.divider()
+
+                col_tipo, col_valor = st.columns(2)
+
+                with col_tipo:
+                    tipo_estorno = st.radio(
+                        "Tipo de Estorno:",
+                        ["Total", "Parcial"],
+                        horizontal=True,
+                        key="tipo_estorno_radio"
+                    )
+
+                with col_valor:
+                    if tipo_estorno == "Parcial":
+                        valor_estornar = st.number_input(
+                            "Valor a estornar (R$):",
+                            min_value=0.01,
+                            max_value=float(venda["disponivel"]),
+                            step=0.01,
+                            value=float(venda["disponivel"]),
+                            key="valor_estorno_input"
+                        )
+                    else:
+                        valor_estornar = float(venda["disponivel"])
+                        st.metric(
+                            "Valor a estornar",
+                            f"R$ {valor_estornar:.2f}"
+                        )
+
+                col_metodo, col_class = st.columns(2)
+
+                with col_metodo:
+                    metodos = [
+                        "Pix", "Débito", "Crédito",
+                        "Dinheiro", "Voucher"
+                    ]
+                    metodo_estorno = st.selectbox(
+                        "Método do Estorno:",
+                        metodos,
+                        index=(
+                            metodos.index(venda["metodo"])
+                            if venda["metodo"] in metodos
+                            else 0
+                        ),
+                        key="metodo_estorno_select"
+                    )
+
+                with col_class:
+                    classificacoes = [
+                        "cliente_desistiu",
+                        "erro_pedido",
+                        "cobranca_duplicada",
+                        "produto_indisponivel",
+                        "outros"
+                    ]
+                    classificacao = st.selectbox(
+                        "Classificação:",
+                        classificacoes,
+                        key="classificacao_estorno_select"
+                    )
+
+                if classificacao == "outros":
+                    motivo = st.text_input(
+                        "Motivo (livre):",
+                        placeholder="Descreva o motivo...",
+                        key="motivo_estorno_input"
+                    )
+                else:
+                    motivo = classificacao
+
+                if st.button(
+                    "↩️ Confirmar Estorno",
+                    use_container_width=True,
+                    type="primary"
+                ):
+                    if not motivo.strip():
+                        st.error("⚠️ Informe o motivo do estorno.")
+                    else:
+                        sucesso, msg = registrar_estorno(
+                            venda["id_venda"],
+                            valor_estornar,
+                            metodo_estorno,
+                            motivo.strip(),
+                            classificacao
+                        )
+
+                        if sucesso:
+                            st.success(
+                                f"✅ Estorno registrado! ID: {msg}"
+                            )
+                            time.sleep(0.5)
+                            st.rerun()
                         else:
-                            st.success("✅ Arquivo válido!")
-                            st.dataframe(df_upload.head(), use_container_width=True, hide_index=True)
+                            st.error(f"❌ {msg}")
+                st.divider()
+            st.subheader("↩️ Estornos do Dia")
 
-                            if st.button("📥 Importar", use_container_width=True, type="primary", key="btn_importar_agendamentos"):
-                                importados, erros = importar_agendamentos_excel(df_upload)
-                                if importados > 0:
-                                    st.success(f"✅ {importados} agendamentos importados!")
-                                    time.sleep(0.5)
-                                    st.rerun()
-                                if erros:
-                                    st.warning(f"⚠️ {len(erros)} erros:")
-                                    for erro in erros[:10]:
-                                        st.write(f"- {erro}")
-                    except Exception as e:
-                        st.error(f"❌ Erro ao ler arquivo: {str(e)}")
+            estornos_dia = caixa.get("estornos", [])
 
-            with st.expander("➕ Novo Agendamento"):
-                with st.form("form_novo_agendamento"):
-                    col1, col2 = st.columns(2)
+            if estornos_dia:
+                df_estornos = pd.DataFrame(estornos_dia)
+                colunas_est = [
+                    c for c in [
+                        "id_estorno",
+                        "id_venda_original",
+                        "valor_estornado",
+                        "tipo",
+                        "metodo",
+                        "classificacao",
+                        "motivo",
+                        "data"
+                    ] if c in df_estornos.columns
+                ]
+                st.dataframe(
+                    df_estornos[colunas_est],
+                    column_config={
+                        "id_estorno": "ID",
+                        "id_venda_original": "Venda",
+                        "valor_estornado": st.column_config.NumberColumn(
+                            "Valor",
+                            format="R$ %.2f"
+                        ),
+                        "tipo": "Tipo",
+                        "metodo": "Método",
+                        "classificacao": "Classificação",
+                        "motivo": "Motivo",
+                        "data": "Data",
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("Nenhum estorno registrado hoje.")
+
+        else:
+
+            sub_mov, sub_agd = st.tabs(["📝 Movimentações", "📅 Agendamentos"])
+
+            with sub_mov:
+                with st.form("form_movimentacao"):
+
+                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 
                     with col1:
-                        descricao_novo = st.text_input("Descrição:")
-                        valor_novo = st.number_input("Valor (R$):", min_value=0.01, step=0.01, value=1.0)
-                        data_venc_novo = st.date_input("Data de Vencimento:", datetime.now())
+                        descricao = st.text_input(
+                            "Descrição:",
+                            placeholder="Ex: Pagamento fornecedor, Troco..."
+                        )
 
                     with col2:
-                        categoria_novo = st.selectbox("Categoria:", CATEGORIAS_AGENDAMENTO)
-                        fornecedor_novo = st.text_input("Fornecedor:")
-                        metodo_novo = st.selectbox("Método:", ["Pix", "Débito", "Crédito", "Dinheiro", "Boleto"])
-
-                    col3, col4, col5 = st.columns(3)
+                        st.write("")
+                        st.write("")
+                        st.caption(f"**{tipo_movimentacao}**")
 
                     with col3:
-                        recorrente_novo = st.checkbox("Recorrente")
+                        valor = st.number_input(
+                            "Valor (R$):",
+                            min_value=0.01,
+                            step=0.01
+                        )
 
                     with col4:
-                        periodicidade_novo = st.selectbox("Periodicidade:", PERIODICIDADES)
+                        metodo_mov = st.selectbox(
+                            "Pagamento:",
+                            ["Pix", "Débito", "Crédito", "Dinheiro", "Voucher"],
+                            key="metodo_movimentacao"
+                        )
 
-                    with col5:
-                        st.write("")
-                        st.write("")
+                    funcionario_pagamento = None
 
-                    observacao_novo = st.text_input("Observação:")
+                    if tipo_movimentacao == "Pagamento":
+                        if 'funcionarios' not in st.session_state:
+                            from utils.staff_utils import carregar_funcionarios
+                            st.session_state.funcionarios = carregar_funcionarios()
+                        funcionarios = st.session_state.funcionarios
+                        nomes_funcionarios = [f.get("nome", "") for f in funcionarios]
+                        funcionario_pagamento = st.selectbox("Funcionário:", nomes_funcionarios)
 
-                    if st.form_submit_button("➕ Criar Agendamento", use_container_width=True, type="primary"):
-                        if not descricao_novo.strip():
-                            st.error("⚠️ Informe a descrição")
-                        else:
-                            criar_agendamento(
-                                descricao=descricao_novo.strip(),
-                                valor=valor_novo,
-                                data_vencimento=data_venc_novo.strftime("%d/%m/%Y"),
-                                categoria=categoria_novo,
-                                fornecedor=fornecedor_novo.strip(),
-                                metodo_pagamento=metodo_novo,
-                                recorrente=recorrente_novo,
-                                periodicidade=periodicidade_novo if recorrente_novo else '',
-                                observacao=observacao_novo.strip()
-                            )
-                            st.success("✅ Agendamento criado!")
-                            time.sleep(0.5)
-                            st.rerun()
+                    if st.form_submit_button("➕ Registrar", use_container_width=True):
+                        if tipo_movimentacao == "Entrada":
+                            caixa["entradas"].append({
+                                "categoria": "Manual",
+                                "descricao": descricao,
+                                "valor": valor,
+                                "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                                "metodo": metodo_mov
+                            })
+                        elif tipo_movimentacao == "Saída":
+                            caixa["saidas"].append({
+                                "descricao": descricao,
+                                "valor": valor,
+                                "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                                "metodo": metodo_mov
+                            })
+                        elif tipo_movimentacao == "Reembolso":
+                            caixa["reembolso"] += valor
+                        elif tipo_movimentacao == "Pagamento":
+                            caixa["pagamentos"].append({
+                                "funcionario": funcionario_pagamento,
+                                "valor": valor,
+                                "descricao": descricao,
+                                "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                                "metodo": metodo_mov
+                            })
 
-            st.divider()
+                        atualizar_historico_caixa(caixa)
+                        salvar_caixa(caixa)
+                        st.session_state.caixa_atual = caixa
 
-            pendentes = listar_pendentes()
+                        st.success(f"✅ {tipo_movimentacao} registrada!")
+                        time.sleep(0.5)
+                        st.rerun()
 
-            if pendentes.empty:
-                st.info("📭 Nenhum agendamento pendente.")
-            else:
-                pendentes_display = pendentes.copy()
-                pendentes_display['data_venc_dt'] = pd.to_datetime(
-                    pendentes_display['data_vencimento'], format="%d/%m/%Y", errors='coerce'
-                )
+                st.divider()
 
-                hoje = pd.Timestamp(datetime.now().date())
+                col_entradas, col_saidas = st.columns(2)
 
-                pendentes_display['situacao'] = pendentes_display['data_venc_dt'].apply(
-                    lambda d: '🔴 Vencido' if pd.notna(d) and d.date() <= hoje.date()
-                    else '🟡 Vencendo' if pd.notna(d) and (d.date() - hoje.date()).days <= 7
-                    else '🟢 Futuro'
-                )
+                with col_entradas:
+                    st.subheader("📥 Entradas")
+                    entradas_manuais = [e for e in caixa["entradas"] if e.get("categoria") == "Manual"]
+                    if entradas_manuais:
+                        st.dataframe(pd.DataFrame(entradas_manuais), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Nenhuma entrada manual registrada.")
 
-                pendentes_display = pendentes_display.sort_values('data_venc_dt')
+                with col_saidas:
+                    st.subheader("📤 Saídas")
+                    if caixa["saidas"]:
+                        st.dataframe(pd.DataFrame(caixa["saidas"]), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Nenhuma saída registrada.")
 
-                st.markdown("**Pendentes**")
+            with sub_agd:
+                with st.expander("📤 Importar Agendamentos via Excel"):
+                    st.markdown("**Formato esperado:**")
+                    st.code("descricao | valor | data_vencimento | categoria | fornecedor (opc) | metodo_pagamento (opc) | recorrente (opc: sim/nao) | periodicidade (opc) | observacao (opc)")
 
-                selecionados = []
+                    arquivo_excel = st.file_uploader(
+                        "Envie o arquivo Excel (.xlsx)",
+                        type=['xlsx'],
+                        key="upload_agendamentos_excel"
+                    )
 
-                for _, row in pendentes_display.iterrows():
-                    with st.container(border=True):
-                        col_chk, col_info, col_btn_pagar, col_btn_cancel = st.columns([0.5, 4, 1, 1])
+                    if arquivo_excel:
+                        try:
+                            df_upload = pd.read_excel(arquivo_excel)
+                            st.write(f"📄 {len(df_upload)} registros encontrados")
 
-                        with col_chk:
-                            if st.checkbox("", key=f"agd_chk_{row['id_agendamento']}"):
-                                selecionados.append(row['id_agendamento'])
+                            obrigatorias = ['descricao', 'valor', 'data_vencimento', 'categoria']
+                            ausentes = [c for c in obrigatorias if c not in df_upload.columns]
 
-                        with col_info:
-                            recorrente_tag = f" 🔁 {row.get('periodicidade', '')}" if row.get('recorrente') else ""
-                            st.markdown(f"{row['situacao']} **{row['descricao']}** — R$ {row['valor']:.2f}{recorrente_tag}")
-                            st.caption(f"Venc: {row['data_vencimento']} | {row['categoria']} | {row.get('fornecedor', '') or '—'} | {row['metodo_pagamento']}")
+                            if ausentes:
+                                st.error(f"❌ Colunas obrigatórias faltando: {', '.join(ausentes)}")
+                            else:
+                                st.success("✅ Arquivo válido!")
+                                st.dataframe(df_upload.head(), use_container_width=True, hide_index=True)
 
-                        with col_btn_pagar:
-                            if st.button("💰 Pagar", key=f"agd_pagar_{row['id_agendamento']}", use_container_width=True):
-                                st.session_state.pagar_id = row['id_agendamento']
+                                if st.button("📥 Importar", use_container_width=True, type="primary", key="btn_importar_agendamentos"):
+                                    importados, erros = importar_agendamentos_excel(df_upload)
+                                    if importados > 0:
+                                        st.success(f"✅ {importados} agendamentos importados!")
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    if erros:
+                                        st.warning(f"⚠️ {len(erros)} erros:")
+                                        for erro in erros[:10]:
+                                            st.write(f"- {erro}")
+                        except Exception as e:
+                            st.error(f"❌ Erro ao ler arquivo: {str(e)}")
+
+                with st.expander("➕ Novo Agendamento"):
+                    with st.form("form_novo_agendamento"):
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            descricao_novo = st.text_input("Descrição:")
+                            valor_novo = st.number_input("Valor (R$):", min_value=0.01, step=0.01, value=1.0)
+                            data_venc_novo = st.date_input("Data de Vencimento:", datetime.now())
+
+                        with col2:
+                            categoria_novo = st.selectbox("Categoria:", CATEGORIAS_AGENDAMENTO)
+                            fornecedor_novo = st.text_input("Fornecedor:")
+                            metodo_novo = st.selectbox("Método:", ["Pix", "Débito", "Crédito", "Dinheiro", "Boleto"])
+
+                        col3, col4, col5 = st.columns(3)
+
+                        with col3:
+                            recorrente_novo = st.checkbox("Recorrente")
+
+                        with col4:
+                            periodicidade_novo = st.selectbox("Periodicidade:", PERIODICIDADES)
+
+                        with col5:
+                            st.write("")
+                            st.write("")
+
+                        observacao_novo = st.text_input("Observação:")
+
+                        if st.form_submit_button("➕ Criar Agendamento", use_container_width=True, type="primary"):
+                            if not descricao_novo.strip():
+                                st.error("⚠️ Informe a descrição")
+                            else:
+                                criar_agendamento(
+                                    descricao=descricao_novo.strip(),
+                                    valor=valor_novo,
+                                    data_vencimento=data_venc_novo.strftime("%d/%m/%Y"),
+                                    categoria=categoria_novo,
+                                    fornecedor=fornecedor_novo.strip(),
+                                    metodo_pagamento=metodo_novo,
+                                    recorrente=recorrente_novo,
+                                    periodicidade=periodicidade_novo if recorrente_novo else '',
+                                    observacao=observacao_novo.strip()
+                                )
+                                st.success("✅ Agendamento criado!")
+                                time.sleep(0.5)
                                 st.rerun()
 
-                        with col_btn_cancel:
-                            if st.button("❌", key=f"agd_cancelar_{row['id_agendamento']}", use_container_width=True):
-                                st.session_state.cancelar_id = row['id_agendamento']
-                                st.rerun()
+                st.divider()
 
-                if selecionados:
-                    if st.button(f"💰 Pagar {len(selecionados)} selecionado(s)", use_container_width=True, type="primary"):
-                        total_pago = 0
-                        for id_agd in selecionados:
-                            sucesso, msg = pagar_agendamento(id_agd)
-                            if sucesso:
-                                total_pago += 1
+                pendentes = listar_pendentes()
 
-                        if total_pago > 0:
-                            st.success(f"✅ {total_pago} agendamento(s) pago(s)!")
-                            time.sleep(0.5)
-                            st.rerun()
+                if pendentes.empty:
+                    st.info("📭 Nenhum agendamento pendente.")
+                else:
+                    pendentes_display = pendentes.copy()
+                    pendentes_display['data_venc_dt'] = pd.to_datetime(
+                        pendentes_display['data_vencimento'], format="%d/%m/%Y", errors='coerce'
+                    )
 
-                if st.session_state.get('pagar_id'):
-                    id_pagar = st.session_state.pagar_id
-                    registro = pendentes_display[pendentes_display['id_agendamento'] == id_pagar]
+                    hoje = pd.Timestamp(datetime.now().date())
 
-                    if not registro.empty:
-                        reg = registro.iloc[0]
-                        st.warning(f"⚠️ Confirmar pagamento de **{reg['descricao']}** — R$ {reg['valor']:.2f}?")
+                    pendentes_display['situacao'] = pendentes_display['data_venc_dt'].apply(
+                        lambda d: '🔴 Vencido' if pd.notna(d) and d.date() <= hoje.date()
+                        else '🟡 Vencendo' if pd.notna(d) and (d.date() - hoje.date()).days <= 7
+                        else '🟢 Futuro'
+                    )
 
-                        col_conf1, col_conf2 = st.columns(2)
+                    pendentes_display = pendentes_display.sort_values('data_venc_dt')
 
-                        with col_conf1:
-                            if st.button("✅ Confirmar", use_container_width=True, type="primary", key="conf_pagar"):
-                                sucesso, msg = pagar_agendamento(id_pagar)
+                    st.markdown("**Pendentes**")
+
+                    selecionados = []
+
+                    for _, row in pendentes_display.iterrows():
+                        with st.container(border=True):
+                            col_chk, col_info, col_btn_pagar, col_btn_cancel = st.columns([0.5, 4, 1, 1])
+
+                            with col_chk:
+                                if st.checkbox("", key=f"agd_chk_{row['id_agendamento']}"):
+                                    selecionados.append(row['id_agendamento'])
+
+                            with col_info:
+                                recorrente_tag = f" 🔁 {row.get('periodicidade', '')}" if row.get('recorrente') else ""
+                                st.markdown(f"{row['situacao']} **{row['descricao']}** — R$ {row['valor']:.2f}{recorrente_tag}")
+                                st.caption(f"Venc: {row['data_vencimento']} | {row['categoria']} | {row.get('fornecedor', '') or '—'} | {row['metodo_pagamento']}")
+
+                            with col_btn_pagar:
+                                if st.button("💰 Pagar", key=f"agd_pagar_{row['id_agendamento']}", use_container_width=True):
+                                    st.session_state.pagar_id = row['id_agendamento']
+                                    st.rerun()
+
+                            with col_btn_cancel:
+                                if st.button("❌", key=f"agd_cancelar_{row['id_agendamento']}", use_container_width=True):
+                                    st.session_state.cancelar_id = row['id_agendamento']
+                                    st.rerun()
+
+                    if selecionados:
+                        if st.button(f"💰 Pagar {len(selecionados)} selecionado(s)", use_container_width=True, type="primary"):
+                            total_pago = 0
+                            for id_agd in selecionados:
+                                sucesso, msg = pagar_agendamento(id_agd)
                                 if sucesso:
+                                    total_pago += 1
+
+                            if total_pago > 0:
+                                st.success(f"✅ {total_pago} agendamento(s) pago(s)!")
+                                time.sleep(0.5)
+                                st.rerun()
+
+                    if st.session_state.get('pagar_id'):
+                        id_pagar = st.session_state.pagar_id
+                        registro = pendentes_display[pendentes_display['id_agendamento'] == id_pagar]
+
+                        if not registro.empty:
+                            reg = registro.iloc[0]
+                            st.warning(f"⚠️ Confirmar pagamento de **{reg['descricao']}** — R$ {reg['valor']:.2f}?")
+
+                            col_conf1, col_conf2 = st.columns(2)
+
+                            with col_conf1:
+                                if st.button("✅ Confirmar", use_container_width=True, type="primary", key="conf_pagar"):
+                                    sucesso, msg = pagar_agendamento(id_pagar)
+                                    if sucesso:
+                                        st.session_state.pagar_id = None
+                                        st.success(f"✅ {msg}")
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {msg}")
+
+                            with col_conf2:
+                                if st.button("❌ Cancelar", use_container_width=True, key="canc_pagar"):
                                     st.session_state.pagar_id = None
-                                    st.success(f"✅ {msg}")
-                                    time.sleep(0.5)
                                     st.rerun()
-                                else:
-                                    st.error(f"❌ {msg}")
 
-                        with col_conf2:
-                            if st.button("❌ Cancelar", use_container_width=True, key="canc_pagar"):
-                                st.session_state.pagar_id = None
-                                st.rerun()
+                    if st.session_state.get('cancelar_id'):
+                        id_cancelar = st.session_state.cancelar_id
+                        registro = pendentes_display[pendentes_display['id_agendamento'] == id_cancelar]
 
-                if st.session_state.get('cancelar_id'):
-                    id_cancelar = st.session_state.cancelar_id
-                    registro = pendentes_display[pendentes_display['id_agendamento'] == id_cancelar]
+                        if not registro.empty:
+                            reg = registro.iloc[0]
+                            st.warning(f"⚠️ Confirmar cancelamento de **{reg['descricao']}**?")
 
-                    if not registro.empty:
-                        reg = registro.iloc[0]
-                        st.warning(f"⚠️ Confirmar cancelamento de **{reg['descricao']}**?")
+                            col_conf1, col_conf2 = st.columns(2)
 
-                        col_conf1, col_conf2 = st.columns(2)
+                            with col_conf1:
+                                if st.button("✅ Confirmar cancelamento", use_container_width=True, key="conf_cancelar"):
+                                    sucesso, msg = cancelar_agendamento(id_cancelar)
+                                    if sucesso:
+                                        st.session_state.cancelar_id = None
+                                        st.success(f"✅ {msg}")
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {msg}")
 
-                        with col_conf1:
-                            if st.button("✅ Confirmar cancelamento", use_container_width=True, key="conf_cancelar"):
-                                sucesso, msg = cancelar_agendamento(id_cancelar)
-                                if sucesso:
+                            with col_conf2:
+                                if st.button("❌ Voltar", use_container_width=True, key="canc_cancelar"):
                                     st.session_state.cancelar_id = None
-                                    st.success(f"✅ {msg}")
-                                    time.sleep(0.5)
                                     st.rerun()
-                                else:
-                                    st.error(f"❌ {msg}")
-
-                        with col_conf2:
-                            if st.button("❌ Voltar", use_container_width=True, key="canc_cancelar"):
-                                st.session_state.cancelar_id = None
-                                st.rerun()
 
     with aba_fiados:
 
@@ -891,17 +1132,19 @@ else:
                 fiados_pendentes
             )
 
+            colunas_fiados = [
+                c for c in [
+                    "id",
+                    "cliente",
+                    "valor",
+                    "data",
+                    "itens",
+                    "tipo"
+                ] if c in df_fiados.columns
+            ]
+
             st.dataframe(
-                df_fiados[
-                    [
-                        "id",
-                        "cliente",
-                        "valor",
-                        "data",
-                        "itens",
-                        "tipo"
-                    ]
-                ],
+                df_fiados[colunas_fiados],
                 column_config={
                     "id": "ID",
                     "cliente": "Cliente",
@@ -1022,16 +1265,18 @@ else:
                 fiados_pagos
             )
 
+            colunas_pagos = [
+                c for c in [
+                    "id",
+                    "cliente",
+                    "valor",
+                    "data",
+                    "data_pagamento"
+                ] if c in df_pagos.columns
+            ]
+
             st.dataframe(
-                df_pagos[
-                    [
-                        "id",
-                        "cliente",
-                        "valor",
-                        "data",
-                        "data_pagamento"
-                    ]
-                ],
+                df_pagos[colunas_pagos],
                 column_config={
                     "id": "ID",
                     "cliente": "Cliente",

@@ -20,7 +20,7 @@ from components.card_descontos import (
 )
 
 from utils.paths import get_caminhos
-
+from utils.staff_utils import carregar_funcionarios
 from utils.mesas_utils import (
     COLUNAS_MESAS,
     filtrar_pedidos_por_sessao,
@@ -37,11 +37,13 @@ from utils.mesas_utils import (
     aplicar_desconto_item,
     remover_desconto_item,
     aplicar_devolucao_item,
-    remover_devolucao_item
+    remover_devolucao_item,
+    obter_id_venda_mesa,
+    reabrir_mesa
 )
 
 from utils.pedidos_utils import sincronizar_historico_pedido, gerar_id_pedido, gerar_cod_item
-from utils.caixa_utils import registrar_venda_no_caixa
+from utils.caixa_utils import registrar_venda_no_caixa, substituir_venda_no_caixa
 from utils.caixa_utils import carregar_historico_caixa
 
 from pages.configuracoes import carregar_config
@@ -65,14 +67,16 @@ if 'comanda_mesa' not in st.session_state:
     st.session_state.comanda_mesa = None
 
 if 'funcionarios' not in st.session_state:
-    from pages.configuracoes import carregar_config
-    st.session_state.funcionarios = carregar_config().get('funcionarios', [])
+    st.session_state.funcionarios = carregar_funcionarios()
 
 if 'estado_mesa' not in st.session_state:
     st.session_state.estado_mesa = {}
 
 if 'confirmar_devolucao' not in st.session_state:
     st.session_state.confirmar_devolucao = None
+
+if 'reabrir_mesa' not in st.session_state:
+    st.session_state.reabrir_mesa = None
 
 
 st.header("Mesas")
@@ -277,6 +281,11 @@ with aba1:
                                     'desconto_valor'
                                 ] = 0.0
 
+                                st.session_state.mesas.loc[
+                                    idx_existente,
+                                    'id_venda_caixa'
+                                ] = ''
+
                                 resetar_estado_mesa(novo_id)
 
                                 if salvar_mesas(
@@ -322,7 +331,8 @@ with aba1:
                                 'ticket_medio': 0.0,
                                 'cover': 0.0,
                                 'incluir_10': False,
-                                'desconto_valor': 0.0
+                                'desconto_valor': 0.0,
+                                'id_venda_caixa': ''
                             }])
 
                             st.session_state.mesas = pd.concat(
@@ -833,7 +843,18 @@ with aba1:
                                         + taxa_garcom
                                     )
 
+                                    id_venda_existente = obter_id_venda_mesa(
+                                        row['id_mesa'],
+                                        mesa_atual['aberto_em']
+                                    )
+
                                     st.divider()
+
+                                    if id_venda_existente:
+                                        st.info(
+                                            f"🔁 Reabertura — venda original "
+                                            f"será substituída: `{id_venda_existente}`"
+                                        )
 
                                     metodo_pagamento = st.selectbox(
                                         "Método de Pagamento:",
@@ -971,20 +992,45 @@ with aba1:
 
                                                             st.stop()
 
-                                                        registrar_venda_no_caixa(
-                                                            'Mesa',
-                                                            valor_total,
-                                                            metodo_pagamento,
-                                                            f"FIADO - {cliente_fiado} - Mesa {row['id_mesa']} - {mesa_atual['garcom']}"
+                                                        descricao = (
+                                                            f"FIADO - {cliente_fiado} - "
+                                                            f"Mesa {row['id_mesa']} - "
+                                                            f"{mesa_atual['garcom']}"
                                                         )
 
                                                     else:
 
-                                                        registrar_venda_no_caixa(
+                                                        descricao = (
+                                                            f"Mesa {row['id_mesa']} - "
+                                                            f"{mesa_atual['garcom']}"
+                                                        )
+
+                                                    if id_venda_existente:
+
+                                                        substituir_venda_no_caixa(
+                                                            id_venda_existente,
                                                             'Mesa',
                                                             valor_total,
                                                             metodo_pagamento,
-                                                            f"Mesa {row['id_mesa']} - {mesa_atual['garcom']}"
+                                                            descricao
+                                                        )
+
+                                                    else:
+
+                                                        _, id_venda_novo = registrar_venda_no_caixa(
+                                                            'Mesa',
+                                                            valor_total,
+                                                            metodo_pagamento,
+                                                            descricao
+                                                        )
+
+                                                        st.session_state.mesas.loc[
+                                                            idx_mesa,
+                                                            'id_venda_caixa'
+                                                        ] = id_venda_novo
+
+                                                        salvar_mesas(
+                                                            st.session_state.mesas
                                                         )
 
                                                     resetar_estado_mesa(
@@ -1742,6 +1788,74 @@ with aba2:
             use_container_width=True,
             hide_index=True
         )
+
+        st.divider()
+        st.markdown("**🔓 Reabrir Mesa**")
+
+        mesas_fechadas_ids = df_historico['id_mesa'].tolist()
+
+        mesa_reabrir = st.selectbox(
+            "Selecione a mesa para reabrir:",
+            mesas_fechadas_ids,
+            key="mesa_reabrir_select"
+        )
+
+        if st.button(
+            "🔓 Reabrir Mesa",
+            use_container_width=True,
+            type="primary",
+            key="btn_reabrir_mesa"
+        ):
+            st.session_state.reabrir_mesa = mesa_reabrir
+            st.rerun()
+
+        if st.session_state.reabrir_mesa == mesa_reabrir:
+
+            st.warning(
+                f"⚠️ Confirma a reabertura da mesa **{mesa_reabrir}**?\n\n"
+                f"• A mesa voltará ao status **aberta**\n"
+                f"• Os valores e pedidos serão mantidos\n"
+                f"• Ao fechar novamente, a venda no caixa "
+                f"será **substituída**"
+            )
+
+            col_conf1, col_conf2 = st.columns(2)
+
+            with col_conf1:
+                if st.button(
+                    "✅ Confirmar",
+                    use_container_width=True,
+                    key="confirmar_reabrir_mesa"
+                ):
+                    st.session_state.mesas, sucesso = reabrir_mesa(
+                        st.session_state.mesas,
+                        mesa_reabrir
+                    )
+
+                    if sucesso:
+                        if salvar_mesas(st.session_state.mesas):
+                            resetar_estado_mesa(mesa_reabrir)
+                            st.session_state.reabrir_mesa = None
+                            st.success(
+                                f"✅ Mesa {mesa_reabrir} reaberta!"
+                            )
+                            time.sleep(0.5)
+                            st.rerun()
+                    else:
+                        st.error("❌ Não foi possível reabrir a mesa.")
+                        st.session_state.reabrir_mesa = None
+                        st.rerun()
+
+            with col_conf2:
+                if st.button(
+                    "❌ Cancelar",
+                    use_container_width=True,
+                    key="cancelar_reabrir_mesa"
+                ):
+                    st.session_state.reabrir_mesa = None
+                    st.rerun()
+
+        st.divider()
 
         if st.button(
             "🗑️ Limpar Histórico",

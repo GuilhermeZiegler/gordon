@@ -1000,12 +1000,6 @@ with aba2:
             column_config['fechado_em'] = 'Fechado em'
 
         renderizar_card_cozinha(df_exibicao, filtro_status)
-        # st.dataframe(
-        #     df_exibicao,
-        #     column_config=column_config,
-        #     use_container_width=True,
-        #     hide_index=True
-        # )
 
         if (
             filtro_status == "Abertos" and

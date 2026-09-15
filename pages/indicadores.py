@@ -114,14 +114,14 @@ st.sidebar.header("Selecionar Gráficos")
 
 mostrar = {
     'metricas': st.sidebar.checkbox("Métricas Gerais", True),
+    'dre': st.sidebar.checkbox("DRE", True),
     'evolucao_mensal': st.sidebar.checkbox("Evolução Mensal (3 meses)", True),
-    'origem_venda': st.sidebar.checkbox("Origem de Venda", True),
     'demanda_diaria': st.sidebar.checkbox("Demanda Diária", True),
     'demanda_semana': st.sidebar.checkbox("Demanda por Dia da Semana", True),
     'distribuicao_horario': st.sidebar.checkbox("Distribuição por Horário", True),
+    'origem_venda': st.sidebar.checkbox("Origem de Venda", True),
     'top_produtos': st.sidebar.checkbox("Top Produtos", True),
     'analise_garcom': st.sidebar.checkbox("Análise por Garçom", True),
-    'analise_categoria': st.sidebar.checkbox("Composição por Categoria", True),
     'menu_vs_bar': st.sidebar.checkbox("Menu vs Bar vs Balcão", True),
     'analise_cliente': st.sidebar.checkbox("Análise por Cliente", True),
     'analise_bairro': st.sidebar.checkbox("Análise por Bairro", True),
@@ -164,6 +164,375 @@ if mostrar['metricas']:
     ]
 
     st.html(card_metricas_html(metricas))
+    st.divider()
+
+
+# ============================================================
+# 1.5. DRE
+# ============================================================
+if mostrar['dre']:
+    from components.card_dre import renderizar_card_dre
+    from utils.caixa_utils import carregar_historico_caixa
+    from utils.agendamentos_utils import carregar_agendamentos
+
+    st.subheader("📊 DRE — Demonstrativo de Resultado")
+
+    col_p1, col_p2, col_p3 = st.columns([2, 1, 1])
+
+    opcoes_periodo = [
+        "Este mês",
+        "Mês passado",
+        "Últimos 3 meses",
+        "Últimos 6 meses",
+        "Últimos 12 meses",
+        "Mês específico",
+        "Intervalo customizado"
+    ]
+
+    with col_p1:
+        periodo_dre = st.selectbox(
+            "Período:",
+            opcoes_periodo,
+            index=0,
+            key="dre_periodo_select"
+        )
+
+    hoje = datetime.now()
+
+    if periodo_dre == "Este mês":
+        inicio = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje
+        label = f"Este mês — {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        inicio_ant = (inicio - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fim_ant = inicio - timedelta(seconds=1)
+        label_ant = f"Mês anterior — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+
+    elif periodo_dre == "Mês passado":
+        inicio = (hoje.replace(day=1) - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(seconds=1)
+        label = f"Mês passado — {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        inicio_ant = (inicio - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fim_ant = inicio - timedelta(seconds=1)
+        label_ant = f"Período anterior — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+
+    elif periodo_dre == "Últimos 3 meses":
+        inicio = (hoje - timedelta(days=90)).replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje
+        label = f"Últimos 3 meses — {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        inicio_ant = inicio - timedelta(days=90)
+        fim_ant = inicio - timedelta(seconds=1)
+        label_ant = f"3 meses anteriores — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+
+    elif periodo_dre == "Últimos 6 meses":
+        inicio = (hoje - timedelta(days=180)).replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje
+        label = f"Últimos 6 meses — {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        inicio_ant = inicio - timedelta(days=180)
+        fim_ant = inicio - timedelta(seconds=1)
+        label_ant = f"6 meses anteriores — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+
+    elif periodo_dre == "Últimos 12 meses":
+        inicio = (hoje - timedelta(days=365)).replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje
+        label = f"Últimos 12 meses — {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        inicio_ant = inicio - timedelta(days=365)
+        fim_ant = inicio - timedelta(seconds=1)
+        label_ant = f"12 meses anteriores — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+
+    elif periodo_dre == "Mês específico":
+        with col_p2:
+            meses_disponiveis = set()
+            for cx in carregar_historico_caixa():
+                data_str = cx.get("data_abertura", "")
+                if data_str:
+                    try:
+                        dt = datetime.strptime(data_str.split(" ")[0], "%d/%m/%Y")
+                        meses_disponiveis.add((dt.year, dt.month))
+                    except Exception:
+                        pass
+
+            if not meses_disponiveis:
+                st.warning("Nenhum mês com dados.")
+                st.stop()
+
+            meses_ordenados = sorted(meses_disponiveis, reverse=True)
+
+            mes_escolhido = st.selectbox(
+                "Mês/Ano:",
+                meses_ordenados,
+                format_func=lambda x: f"{x[1]:02d}/{x[0]}",
+                key="dre_mes_especifico"
+            )
+
+        inicio = datetime(mes_escolhido[0], mes_escolhido[1], 1)
+        if mes_escolhido[1] == 12:
+            proximo = datetime(mes_escolhido[0] + 1, 1, 1)
+        else:
+            proximo = datetime(mes_escolhido[0], mes_escolhido[1] + 1, 1)
+        fim = proximo - timedelta(seconds=1)
+
+        label = f"{mes_escolhido[1]:02d}/{mes_escolhido[0]} — {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+
+        ano_ant = mes_escolhido[0] - 1
+        if (ano_ant, mes_escolhido[1]) in meses_disponiveis:
+            inicio_ant = datetime(ano_ant, mes_escolhido[1], 1)
+            if mes_escolhido[1] == 12:
+                proximo_ant = datetime(ano_ant + 1, 1, 1)
+            else:
+                proximo_ant = datetime(ano_ant, mes_escolhido[1] + 1, 1)
+            fim_ant = proximo_ant - timedelta(seconds=1)
+            label_ant = f"Mesmo mês ano anterior — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+        else:
+            inicio_ant = None
+            fim_ant = None
+            label_ant = "Sem dados do ano anterior"
+
+    else:
+        with col_p2:
+            data_ini = st.date_input("Início:", hoje - timedelta(days=30), key="dre_ini")
+        with col_p3:
+            data_fim = st.date_input("Fim:", hoje, key="dre_fim")
+
+        inicio = datetime.combine(data_ini, datetime.min.time())
+        fim = datetime.combine(data_fim, datetime.max.time())
+
+        label = f"{inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+
+        duracao = fim - inicio
+        inicio_ant = inicio - duracao
+        fim_ant = inicio - timedelta(seconds=1)
+        label_ant = f"Período anterior — {inicio_ant.strftime('%d/%m/%Y')} a {fim_ant.strftime('%d/%m/%Y')}"
+
+    with col_p3 if periodo_dre != "Intervalo customizado" else col_p1:
+        comparar = st.checkbox(
+            "Comparar com período anterior",
+            value=False,
+            key="dre_comparar"
+        )
+
+    st.divider()
+
+    st.markdown("**Split do 10% Atendimento**")
+
+    col_s1, col_s2, col_s3 = st.columns(3)
+
+    with col_s1:
+        pct_garcom = st.number_input("Garçom (%)", min_value=0, max_value=100, value=70, step=5, key="dre_pct_garcom")
+    with col_s2:
+        pct_limpeza = st.number_input("Limpeza (%)", min_value=0, max_value=100, value=0, step=5, key="dre_pct_limpeza")
+    with col_s3:
+        pct_cozinha = st.number_input("Cozinha (%)", min_value=0, max_value=100, value=30, step=5, key="dre_pct_cozinha")
+
+    soma_split = pct_garcom + pct_limpeza + pct_cozinha
+
+    if soma_split != 100:
+        st.warning(f"⚠️ Soma do split: {soma_split}% (deve ser 100%).")
+
+    from utils.movimentacoes_utils import calcular_estoque_atual
+
+    def _coletar_dre(inicio_dt, fim_dt, pct_garcom, pct_limpeza, pct_cozinha):
+        vendas_mesa = 0.0
+        vendas_balcao = 0.0
+        vendas_takeaway = 0.0
+        vendas_delivery = 0.0
+        estornos = 0.0
+        reembolsos = 0.0
+        saidas_caixa = 0.0
+
+        for cx in carregar_historico_caixa():
+            data_abertura = cx.get("data_abertura", "")
+            if not data_abertura:
+                continue
+            try:
+                dt_cx = datetime.strptime(data_abertura, "%d/%m/%Y %H:%M:%S")
+            except Exception:
+                continue
+
+            if dt_cx < inicio_dt or dt_cx > fim_dt:
+                continue
+
+            vendas_mesa += float(cx.get("vendas_mesa", 0) or 0)
+            vendas_balcao += float(cx.get("vendas_balcao", 0) or 0)
+            vendas_takeaway += float(cx.get("vendas_takeaway", 0) or 0)
+            vendas_delivery += float(cx.get("vendas_delivery", 0) or 0)
+            reembolsos += float(cx.get("reembolso", 0) or 0)
+
+            for e in cx.get("estornos", []):
+                estornos += float(e.get("valor_estornado", 0))
+
+            for s in cx.get("saidas", []):
+                saidas_caixa += float(s.get("valor", 0))
+
+        # Coberturas e 10% vêm do historico_mesas
+        cover_total = 0.0
+        valor_10_total = 0.0
+        descontos = 0.0
+
+        try:
+            import pickle
+            with open("data/historico_mesas.pkl", "rb") as f:
+                hist_mesas = pickle.load(f)
+            for m in hist_mesas:
+                fechado_em = m.get("fechado_em", "")
+                if not fechado_em:
+                    continue
+                try:
+                    dt_m = datetime.strptime(fechado_em, "%d/%m/%Y %H:%M:%S")
+                except Exception:
+                    continue
+                if dt_m < inicio_dt or dt_m > fim_dt:
+                    continue
+                cover_total += float(m.get("cover", 0)) * int(m.get("qtd_clientes", 0))
+                valor_10_total += float(m.get("valor_10", 0))
+                descontos += float(m.get("desconto_valor", 0))
+        except Exception:
+            pass
+
+        # Despesas: agendamentos pagos + saídas do caixa
+        despesas_detalhe = {}
+
+        try:
+            df_agd = carregar_agendamentos()
+            if not df_agd.empty:
+                df_pagos = df_agd[df_agd["status"] == "pago"].copy()
+                df_pagos["data_pgto_dt"] = pd.to_datetime(
+                    df_pagos["data_pagamento"],
+                    format="%d/%m/%Y %H:%M:%S",
+                    errors="coerce"
+                )
+                df_pagos = df_pagos[
+                    (df_pagos["data_pgto_dt"] >= inicio_dt) &
+                    (df_pagos["data_pgto_dt"] <= fim_dt)
+                ]
+                for _, row in df_pagos.iterrows():
+                    cat = row.get("categoria", "Outros")
+                    despesas_detalhe[cat] = despesas_detalhe.get(cat, 0.0) + float(row.get("valor", 0))
+        except Exception:
+            pass
+
+        if saidas_caixa > 0:
+            despesas_detalhe["Saídas do Caixa"] = saidas_caixa
+
+        despesas_total = sum(despesas_detalhe.values())
+
+        # Taxa de entrega (do caixa de delivery)
+        taxa_entrega = 0.0
+        try:
+            with open("data/historico_pedidos.pkl", "rb") as f:
+                hist_pedidos = pickle.load(f)
+            if isinstance(hist_pedidos, list):
+                hist_pedidos = pd.DataFrame(hist_pedidos)
+            if not hist_pedidos.empty:
+                hist_pedidos["criado_dt"] = pd.to_datetime(
+                    hist_pedidos["criado_em"],
+                    format="%d/%m/%Y %H:%M:%S",
+                    errors="coerce"
+                )
+                hist_pedidos = hist_pedidos[
+                    (hist_pedidos["criado_dt"] >= inicio_dt) &
+                    (hist_pedidos["criado_dt"] <= fim_dt)
+                ]
+                delivery = hist_pedidos[hist_pedidos["origem_venda"] == "delivery"]
+                if not delivery.empty:
+                    taxa_entrega = float(delivery["taxa_entrega"].drop_duplicates().sum())
+        except Exception:
+            pass
+
+        # CMV simplificado (produto sem ficha = 0)
+        cmv = 0.0
+        try:
+            with open("data/ficha_tecnica.pkl", "rb") as f:
+                df_ficha = pickle.load(f)
+            with open("data/insumos.pkl", "rb") as f:
+                df_insumos = pickle.load(f)
+            with open("data/historico_pedidos.pkl", "rb") as f:
+                hist_pedidos = pickle.load(f)
+            if isinstance(hist_pedidos, list):
+                hist_pedidos = pd.DataFrame(hist_pedidos)
+
+            if not df_ficha.empty and not df_insumos.empty and not hist_pedidos.empty:
+                hist_pedidos["criado_dt"] = pd.to_datetime(
+                    hist_pedidos["criado_em"],
+                    format="%d/%m/%Y %H:%M:%S",
+                    errors="coerce"
+                )
+                pedidos_periodo = hist_pedidos[
+                    (hist_pedidos["criado_dt"] >= inicio_dt) &
+                    (hist_pedidos["criado_dt"] <= fim_dt) &
+                    (hist_pedidos["status"] != "cancelado")
+                ]
+
+                insumos_map = df_insumos.set_index("id_insumo")["preco_unitario"].to_dict()
+
+                for _, pedido in pedidos_periodo.iterrows():
+                    cod_prod = str(pedido["cod_prod"])
+                    qtd = float(pedido["quantidade"])
+                    ficha = df_ficha[df_ficha["cod_prod"].astype(str) == cod_prod]
+                    for _, item in ficha.iterrows():
+                        id_ins = item["id_insumo"]
+                        qtd_item = float(item["quantidade"])
+                        unidade_ficha = item["unidade_ficha"]
+
+                        preco = float(insumos_map.get(id_ins, 0))
+
+                        if unidade_ficha == "g" and "kg" in str(df_insumos[df_insumos["id_insumo"] == id_ins]["unidade_compra"].values):
+                            qtd_item = qtd_item / 1000
+                        elif unidade_ficha == "ml" and "L" in str(df_insumos[df_insumos["id_insumo"] == id_ins]["unidade_compra"].values):
+                            qtd_item = qtd_item / 1000
+
+                        cmv += qtd_item * qtd * preco
+        except Exception:
+            pass
+
+        receita_bruta = vendas_mesa + vendas_balcao + vendas_takeaway + vendas_delivery
+        receita_liquida = receita_bruta - estornos - descontos
+        lucro_bruto = receita_liquida - cmv
+        lucro_operacional = lucro_bruto - despesas_total
+
+        repasse_cover = cover_total
+        repasse_taxa = taxa_entrega
+        repasse_10 = valor_10_total
+
+        repasse_10_split = {
+            "Garçom": round(repasse_10 * pct_garcom / 100, 2),
+            "Limpeza": round(repasse_10 * pct_limpeza / 100, 2),
+            "Cozinha": round(repasse_10 * pct_cozinha / 100, 2),
+        }
+
+        repasses_total = repasse_cover + repasse_taxa + repasse_10
+        resultado_liquido = lucro_operacional - repasses_total
+
+        return {
+            "periodo_label": label,
+            "receita_bruta": round(receita_bruta, 2),
+            "vendas_mesa": round(vendas_mesa, 2),
+            "vendas_balcao": round(vendas_balcao, 2),
+            "vendas_takeaway": round(vendas_takeaway, 2),
+            "vendas_delivery": round(vendas_delivery, 2),
+            "estornos": round(estornos, 2),
+            "descontos": round(descontos, 2),
+            "receita_liquida": round(receita_liquida, 2),
+            "cmv": round(cmv, 2),
+            "lucro_bruto": round(lucro_bruto, 2),
+            "despesas_total": round(despesas_total, 2),
+            "despesas_detalhe": {k: round(v, 2) for k, v in despesas_detalhe.items()},
+            "lucro_operacional": round(lucro_operacional, 2),
+            "repasses_total": round(repasses_total, 2),
+            "repasse_cover": round(repasse_cover, 2),
+            "repasse_taxa_entrega": round(repasse_taxa, 2),
+            "repasse_10": round(repasse_10, 2),
+            "repasse_10_split": repasse_10_split,
+            "resultado_liquido": round(resultado_liquido, 2),
+        }
+
+    dre_atual = _coletar_dre(inicio, fim, pct_garcom, pct_limpeza, pct_cozinha)
+
+    dre_ant = None
+    if comparar and inicio_ant and fim_ant:
+        dre_ant = _coletar_dre(inicio_ant, fim_ant, pct_garcom, pct_limpeza, pct_cozinha)
+        dre_ant["periodo_label"] = label_ant
+
+    renderizar_card_dre(dre_atual, comparativo=dre_ant)
     st.divider()
 
 
@@ -242,50 +611,6 @@ if mostrar['evolucao_mensal'] and not df_pedidos.empty:
             with col3:
                 media_3m = df_evo_agg['faturamento'].mean()
                 st.metric("Média 3 Meses", f"R$ {media_3m:,.2f}")
-
-    st.divider()
-
-
-# ============================================================
-# 3. ORIGEM DE VENDA
-# ============================================================
-if mostrar['origem_venda'] and not df_pedidos_filtrado.empty:
-    st.subheader("Análise por Origem de Venda")
-
-    df_origem = df_pedidos_filtrado.copy()
-    df_origem['faturamento_item'] = df_origem['valor_com_desconto'] + df_origem['taxa_entrega'] + df_origem['taxa_embalagem']
-
-    df_origem_agg = df_origem.groupby('origem_venda').agg({
-        'faturamento_item': 'sum',
-        'id_pedido': 'nunique',
-        'quantidade': 'sum'
-    }).reset_index()
-    df_origem_agg.columns = ['origem', 'faturamento', 'pedidos', 'itens']
-    df_origem_agg['ticket_medio'] = df_origem_agg['faturamento'] / df_origem_agg['pedidos']
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        fig = px.bar(
-            df_origem_agg, x='origem', y='faturamento',
-            title="Faturamento por Origem",
-            labels={'origem': '', 'faturamento': 'Faturamento (R$)'},
-            color='origem',
-            color_discrete_sequence=px.colors.qualitative.Set2
-        )
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        fig = px.bar(
-            df_origem_agg, x='origem', y='ticket_medio',
-            title="Ticket Médio por Origem",
-            labels={'origem': '', 'ticket_medio': 'Ticket Médio (R$)'},
-            color='origem',
-            color_discrete_sequence=px.colors.qualitative.Set2
-        )
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
@@ -374,7 +699,6 @@ if mostrar['demanda_semana'] and not df_pedidos_filtrado.empty:
 
     st.divider()
 
-
 # ============================================================
 # 6. DISTRIBUIÇÃO POR HORÁRIO
 # ============================================================
@@ -399,24 +723,156 @@ if mostrar['distribuicao_horario'] and not df_pedidos_filtrado.empty:
     st.plotly_chart(fig, use_container_width=True)
     st.divider()
 
-
 # ============================================================
-# 7. TOP PRODUTOS
+# 3. ORIGEM DE VENDA
 # ============================================================
-if mostrar['top_produtos'] and not df_pedidos_filtrado.empty:
-    st.subheader("Top Produtos")
+if mostrar['origem_venda'] and not df_pedidos_filtrado.empty:
+    st.subheader("Origem de Venda")
 
-    df_top = df_pedidos_filtrado.copy()
-    df_top_agg = df_top.groupby('nome_prod').agg({
-        'quantidade': 'sum',
-        'subtotal': 'sum'
-    }).sort_values('quantidade', ascending=False).head(10).reset_index()
+    df_origem = df_pedidos_filtrado.copy()
+    df_origem['faturamento_item'] = df_origem['valor_com_desconto'] + df_origem['taxa_entrega'] + df_origem['taxa_embalagem']
+
+    df_origem_agg = df_origem.groupby('origem_venda').agg({
+        'faturamento_item': 'sum',
+        'id_pedido': 'nunique',
+        'quantidade': 'sum'
+    }).reset_index()
+    df_origem_agg.columns = ['origem', 'faturamento', 'pedidos', 'itens']
+    df_origem_agg['ticket_medio'] = df_origem_agg['faturamento'] / df_origem_agg['pedidos']
 
     col1, col2 = st.columns(2)
 
     with col1:
         fig = px.bar(
-            df_top_agg, x='quantidade', y='nome_prod',
+            df_origem_agg, x='origem', y='faturamento',
+            title="Faturamento por Origem",
+            labels={'origem': '', 'faturamento': 'Faturamento (R$)'},
+            color='origem',
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        fig = px.bar(
+            df_origem_agg, x='origem', y='ticket_medio',
+            title="Ticket Médio por Origem",
+            labels={'origem': '', 'ticket_medio': 'Ticket Médio (R$)'},
+            color='origem',
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+
+# ============================================================
+# 7. TOP PRODUTOS
+# ============================================================
+if mostrar['top_produtos'] and not df_pedidos_filtrado.empty:
+
+    df_top = df_pedidos_filtrado.copy()
+    df_top = df_top[df_top['status'] != 'cancelado']
+
+    df_agg = df_top.groupby('nome_prod').agg({
+        'quantidade': 'sum',
+        'subtotal': 'sum',
+        'categoria': 'first'
+    }).reset_index()
+
+    df_agg = df_agg.sort_values('subtotal', ascending=False).reset_index(drop=True)
+
+    total_faturamento = df_agg['subtotal'].sum()
+
+    # ---------- 7.1 PARETO ----------
+    st.markdown("### Pareto de Faturamento")
+
+    limiar_pareto = st.number_input(
+        "Limiar (%):",
+        min_value=1,
+        max_value=100,
+        value=80,
+        step=5,
+        key="pareto_limiar"
+    )
+
+    if total_faturamento <= 0:
+        st.info("Sem faturamento no período.")
+    else:
+        df_pareto = df_agg.copy()
+        df_pareto['perc_acumulado'] = (
+            df_pareto['subtotal'].cumsum() / total_faturamento * 100
+        ).round(2)
+
+        corte = df_pareto[df_pareto['perc_acumulado'] <= limiar_pareto]
+        qtd_itens_corte = len(corte) + 1 if len(corte) < len(df_pareto) else len(df_pareto)
+
+        st.caption(
+            f"**{qtd_itens_corte}** produtos representam **{limiar_pareto}%** do faturamento "
+            f"(de {len(df_pareto)} no total)."
+        )
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        fig.add_trace(
+            go.Bar(
+                x=df_pareto['nome_prod'],
+                y=df_pareto['subtotal'],
+                name="Faturamento",
+                marker_color='#3498db'
+            ),
+            secondary_y=False,
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=df_pareto['nome_prod'],
+                y=df_pareto['perc_acumulado'],
+                name="% Acumulado",
+                mode='lines+markers',
+                line=dict(color='#f39c12', width=2)
+            ),
+            secondary_y=True,
+        )
+
+        fig.add_hline(
+            y=limiar_pareto,
+            line_dash="dash",
+            line_color="#e74c3c",
+            annotation_text=f"{limiar_pareto}%",
+            annotation_position="top left",
+            secondary_y=True
+        )
+
+        fig.update_layout(
+            title=f"Curva de Pareto — Limiar {limiar_pareto}%",
+            xaxis_title="Produto",
+            hovermode='x unified',
+            height=450,
+            showlegend=True
+        )
+        fig.update_yaxes(title_text="Faturamento (R$)", secondary_y=False)
+        fig.update_yaxes(
+            title_text="% Acumulado",
+            secondary_y=True,
+            range=[0, 105]
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ---------- 7.2 TOP 10 GERAL ----------
+    st.markdown("### 🏆 Top 10 Geral")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        top_qtd = df_agg.sort_values('quantidade', ascending=False).head(10)
+
+        fig = px.bar(
+            top_qtd, x='quantidade', y='nome_prod',
             title="Top 10 Produtos Mais Vendidos",
             labels={'quantidade': 'Quantidade', 'nome_prod': ''},
             orientation='h',
@@ -427,8 +883,10 @@ if mostrar['top_produtos'] and not df_pedidos_filtrado.empty:
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
+        top_fat = df_agg.sort_values('subtotal', ascending=False).head(10)
+
         fig = px.bar(
-            df_top_agg, x='subtotal', y='nome_prod',
+            top_fat, x='subtotal', y='nome_prod',
             title="Top 10 Produtos com Maior Faturamento",
             labels={'subtotal': 'Faturamento (R$)', 'nome_prod': ''},
             orientation='h',
@@ -437,6 +895,104 @@ if mostrar['top_produtos'] and not df_pedidos_filtrado.empty:
         )
         fig.update_layout(height=400)
         st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ---------- 7.2 FATURAMENTO POR CATEGORIA ----------
+    st.markdown("### Faturamento por Categoria")
+
+    df_cat = df_top[df_top['categoria'].notna() & (df_top['categoria'] != '')].copy()
+
+    if df_cat.empty:
+        st.info("Nenhum dado de categoria disponível.")
+    else:
+        df_cat_agg = df_cat.groupby('categoria').agg({
+            'subtotal': 'sum',
+            'quantidade': 'sum'
+        }).reset_index().sort_values('subtotal', ascending=False)
+
+        total_cat = df_cat_agg['subtotal'].sum()
+        df_cat_agg['percentual'] = (df_cat_agg['subtotal'] / total_cat * 100).round(1)
+
+        fig = px.bar(
+            df_cat_agg.sort_values('subtotal'),
+            x='subtotal', y='categoria',
+            orientation='h',
+            title="Faturamento por Categoria",
+            labels={'subtotal': 'Faturamento (R$)', 'categoria': ''},
+            color='subtotal',
+            color_continuous_scale='Teal',
+            text=df_cat_agg.sort_values('subtotal')['percentual'].apply(lambda x: f"{x:.1f}%")
+        )
+        fig.update_traces(textposition='outside')
+        fig.update_layout(height=max(400, len(df_cat_agg) * 40), coloraxis_showscale=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ---------- 7.4 CONCENTRAÇÃO POR CATEGORIA ----------
+    st.markdown("### 🎯 Concentração por Categoria")
+
+    if df_cat.empty:
+        st.info("Nenhum dado de categoria disponível.")
+    else:
+        linhas_concentracao = []
+
+        for cat in df_cat_agg['categoria'].tolist():
+            subset = df_cat[df_cat['categoria'] == cat]
+            subset_agg = subset.groupby('nome_prod').agg({
+                'subtotal': 'sum',
+                'quantidade': 'sum'
+            }).reset_index().sort_values('subtotal', ascending=False)
+
+            total_cat_item = subset_agg['subtotal'].sum()
+            n_produtos = len(subset_agg)
+
+            if total_cat_item <= 0:
+                continue
+
+            lider = subset_agg.iloc[0]
+            fat_lider = lider['subtotal']
+            conc_top1 = fat_lider / total_cat_item * 100
+
+            top3 = subset_agg.head(3)
+            conc_top3 = top3['subtotal'].sum() / total_cat_item * 100
+
+            if conc_top1 >= 50:
+                sinal = "🔴"
+            elif conc_top1 >= 30:
+                sinal = "🟡"
+            else:
+                sinal = "🟢"
+
+            linhas_concentracao.append({
+                'Categoria': cat,
+                'Nº Produtos': n_produtos,
+                'Faturamento': f"R$ {total_cat_item:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                'Líder': lider['nome_prod'],
+                'Fat. Líder': f"R$ {fat_lider:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                'Conc. Top 1': f"{sinal} {conc_top1:.1f}%",
+                'Conc. Top 3': f"{conc_top3:.1f}%",
+            })
+
+        if linhas_concentracao:
+            st.dataframe(
+                pd.DataFrame(linhas_concentracao),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            alertas = [
+                l['Categoria'] for l in linhas_concentracao
+                if l['Conc. Top 1'].startswith('🔴')
+            ]
+
+            if alertas:
+                st.warning(
+                    f"⚠️ **Atenção:** {', '.join(alertas)} "
+                    f"{'tem' if len(alertas) == 1 else 'têm'} mais de 50% "
+                    f"do faturamento concentrado em 1 produto."
+                )
 
     st.divider()
 
@@ -489,51 +1045,51 @@ if mostrar['analise_garcom'] and not df_mesas_filtrado.empty:
 
 # ============================================================
 # 9. COMPOSIÇÃO POR CATEGORIA
-# ============================================================
-if mostrar['analise_categoria'] and not df_pedidos_filtrado.empty:
-    st.subheader("Composição do Faturamento por Categoria")
+# # ============================================================
+# if mostrar['analise_categoria'] and not df_pedidos_filtrado.empty:
+#     st.subheader("Composição do Faturamento por Categoria")
 
-    df_cat = df_pedidos_filtrado.copy()
-    df_cat = df_cat[df_cat['categoria'].notna() & (df_cat['categoria'] != '')]
+#     df_cat = df_pedidos_filtrado.copy()
+#     df_cat = df_cat[df_cat['categoria'].notna() & (df_cat['categoria'] != '')]
 
-    if not df_cat.empty:
-        df_cat_agg = df_cat.groupby('categoria').agg({
-            'subtotal': 'sum',
-            'quantidade': 'sum'
-        }).reset_index().sort_values('subtotal', ascending=False)
+#     if not df_cat.empty:
+#         df_cat_agg = df_cat.groupby('categoria').agg({
+#             'subtotal': 'sum',
+#             'quantidade': 'sum'
+#         }).reset_index().sort_values('subtotal', ascending=False)
 
-        total_geral = df_cat_agg['subtotal'].sum()
-        df_cat_agg['percentual'] = (df_cat_agg['subtotal'] / total_geral * 100) if total_geral > 0 else 0
+#         total_geral = df_cat_agg['subtotal'].sum()
+#         df_cat_agg['percentual'] = (df_cat_agg['subtotal'] / total_geral * 100) if total_geral > 0 else 0
 
-        fig = px.bar(
-            df_cat_agg.sort_values('subtotal'),
-            x='subtotal', y='categoria',
-            orientation='h',
-            title="Faturamento por Categoria",
-            labels={'subtotal': 'Faturamento (R$)', 'categoria': ''},
-            color='subtotal',
-            color_continuous_scale='Viridis',
-            text=df_cat_agg.sort_values('subtotal')['percentual'].apply(lambda x: f"{x:.1f}%")
-        )
-        fig.update_traces(textposition='outside')
-        fig.update_layout(height=max(400, len(df_cat_agg) * 30))
-        st.plotly_chart(fig, use_container_width=True)
+#         fig = px.bar(
+#             df_cat_agg.sort_values('subtotal'),
+#             x='subtotal', y='categoria',
+#             orientation='h',
+#             title="Faturamento por Categoria",
+#             labels={'subtotal': 'Faturamento (R$)', 'categoria': ''},
+#             color='subtotal',
+#             color_continuous_scale='Viridis',
+#             text=df_cat_agg.sort_values('subtotal')['percentual'].apply(lambda x: f"{x:.1f}%")
+#         )
+#         fig.update_traces(textposition='outside')
+#         fig.update_layout(height=max(400, len(df_cat_agg) * 30))
+#         st.plotly_chart(fig, use_container_width=True)
 
-        # st.dataframe(
-        #     df_cat_agg[['categoria', 'subtotal', 'quantidade', 'percentual']],
-        #     column_config={
-        #         'categoria': 'Categoria',
-        #         'subtotal': st.column_config.NumberColumn('Faturamento', format="R$ %.2f"),
-        #         'quantidade': 'Qtd',
-        #         'percentual': st.column_config.NumberColumn('% do Total', format="%.2f%%"),
-        #     },
-        #     use_container_width=True,
-        #     hide_index=True
-        # )
-    else:
-        st.info("Nenhum dado de categoria disponível.")
+#         # st.dataframe(
+#         #     df_cat_agg[['categoria', 'subtotal', 'quantidade', 'percentual']],
+#         #     column_config={
+#         #         'categoria': 'Categoria',
+#         #         'subtotal': st.column_config.NumberColumn('Faturamento', format="R$ %.2f"),
+#         #         'quantidade': 'Qtd',
+#         #         'percentual': st.column_config.NumberColumn('% do Total', format="%.2f%%"),
+#         #     },
+#         #     use_container_width=True,
+#         #     hide_index=True
+#         # )
+#     else:
+#         st.info("Nenhum dado de categoria disponível.")
 
-    st.divider()
+#     st.divider()
 
 
 # ============================================================
@@ -589,31 +1145,30 @@ if mostrar['menu_vs_bar'] and not df_pedidos_filtrado.empty:
             fig.update_layout(height=400, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("**Top 10 Categorias por Faturamento (colorido por tipo)**")
+    #     st.markdown("**Top 10 Categorias por Faturamento (colorido por tipo)**")
 
-        df_cat_tipo = df_tv[df_tv['categoria'].notna() & (df_tv['categoria'] != '')].copy()
-        df_cat_tipo_agg = df_cat_tipo.groupby(['categoria', 'tipo_grupo']).agg({
-            'subtotal': 'sum'
-        }).reset_index().sort_values('subtotal', ascending=False).head(10)
+    #     df_cat_tipo = df_tv[df_tv['categoria'].notna() & (df_tv['categoria'] != '')].copy()
+    #     df_cat_tipo_agg = df_cat_tipo.groupby(['categoria', 'tipo_grupo']).agg({
+    #         'subtotal': 'sum'
+    #     }).reset_index().sort_values('subtotal', ascending=False).head(10)
 
-        fig = px.bar(
-            df_cat_tipo_agg.sort_values('subtotal'),
-            x='subtotal', y='categoria',
-            orientation='h',
-            color='tipo_grupo',
-            title="Top 10 Categorias por Faturamento",
-            labels={'subtotal': 'Faturamento (R$)', 'categoria': '', 'tipo_grupo': 'Tipo'},
-            color_discrete_sequence=px.colors.qualitative.Set2,
-            text='subtotal'
-        )
-        fig.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
-        fig.update_layout(height=max(400, len(df_cat_tipo_agg) * 40))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Coluna 'tipo_venda' não disponível nos pedidos.")
+    #     fig = px.bar(
+    #         df_cat_tipo_agg.sort_values('subtotal'),
+    #         x='subtotal', y='categoria',
+    #         orientation='h',
+    #         color='tipo_grupo',
+    #         title="Top 10 Categorias por Faturamento",
+    #         labels={'subtotal': 'Faturamento (R$)', 'categoria': '', 'tipo_grupo': 'Tipo'},
+    #         color_discrete_sequence=px.colors.qualitative.Set2,
+    #         text='subtotal'
+    #     )
+    #     fig.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
+    #     fig.update_layout(height=max(400, len(df_cat_tipo_agg) * 40))
+    #     st.plotly_chart(fig, use_container_width=True)
+    # else:
+    #     st.info("Coluna 'tipo_venda' não disponível nos pedidos.")
 
-    st.divider()
-
+    # st.divider()
 
 # ============================================================
 # 11. ANÁLISE POR CLIENTE
@@ -1312,7 +1867,7 @@ if mostrar['analise_estoque']:
                 hide_index=True
             )
 
-        st.markdown("### 🕒 Estoque Obsoleto (sem venda há 7+ dias)")
+        st.markdown("### Estoque Obsoleto (sem venda há 7+ dias)")
 
         df_obs = df_est[df_est['alerta_obsoleto']].copy()
         if df_obs.empty:

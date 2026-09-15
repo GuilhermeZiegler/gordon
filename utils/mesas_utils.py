@@ -14,7 +14,7 @@ CAMINHO_PEDIDOS_PKL = _c["pedidos"].replace('.xlsx', '.pkl')
 COLUNAS_MESAS = [
     'id_mesa', 'status', 'garcom', 'qtd_clientes', 'aberto_em', 'fechado_em',
     'valor_pedidos', 'valor_total', 'valor_com_desconto', 'desconto_valor',
-    'valor_10', 'ticket_medio', 'cover', 'incluir_10'
+    'valor_10', 'ticket_medio', 'cover', 'incluir_10', 'id_venda_caixa'
 ]
 
 def filtrar_pedidos_por_sessao(mesa_id, pedidos_df, aberto_em_str, fechado_em_str):
@@ -108,6 +108,9 @@ def carregar_mesas():
 
         if 'incluir_10' in df.columns:
             df['incluir_10'] = df['incluir_10'].fillna(False)
+
+        if 'id_venda_caixa' not in df.columns:
+            df['id_venda_caixa'] = ''
 
         return df
 
@@ -292,10 +295,66 @@ def adicionar_historico_mesa(mesa_historico):
     else:
         historico = []
 
-    historico.append(mesa_historico)
+    chave_nova = (
+        str(mesa_historico.get('id_mesa', '')),
+        str(mesa_historico.get('aberto_em', ''))
+    )
+
+    substituido = False
+    for i, registro in enumerate(historico):
+        chave_existente = (
+            str(registro.get('id_mesa', '')),
+            str(registro.get('aberto_em', ''))
+        )
+        if chave_existente == chave_nova:
+            historico[i] = mesa_historico
+            substituido = True
+            break
+
+    if not substituido:
+        historico.append(mesa_historico)
 
     with open(caminho, 'wb') as f:
         pickle.dump(historico, f)
+
+
+def obter_id_venda_mesa(mesa_id, aberto_em):
+    mesas_df = carregar_mesas()
+
+    if mesas_df.empty:
+        return ''
+
+    filtro = (
+        (mesas_df['id_mesa'].astype(str) == str(mesa_id)) &
+        (mesas_df['aberto_em'].astype(str) == str(aberto_em))
+    )
+
+    if not filtro.any():
+        return ''
+
+    id_v = mesas_df.loc[filtro, 'id_venda_caixa'].iloc[0]
+
+    if pd.isna(id_v):
+        return ''
+
+    return str(id_v)
+
+
+def reabrir_mesa(mesas_df, mesa_id):
+    idx = mesas_df[mesas_df['id_mesa'] == mesa_id].index
+
+    if idx.empty:
+        return mesas_df, False
+
+    idx = idx[0]
+
+    if mesas_df.loc[idx, 'status'] != 'fechada':
+        return mesas_df, False
+
+    mesas_df.loc[idx, 'status'] = 'aberta'
+    mesas_df.loc[idx, 'fechado_em'] = ''
+
+    return mesas_df, True
 
 
 def obter_itens_mesa(mesa_id, pedidos_df):

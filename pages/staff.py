@@ -1,65 +1,17 @@
 import streamlit as st
-import os
-import pickle
-import hashlib
 import time
-from datetime import datetime
-
+from utils.staff_utils import carregar_funcionarios as _carregar, salvar_funcionarios as _salvar
 
 from components.auth import exigir_permissao
 exigir_permissao("staff")
 
-
-_CAMINHO_FUNCIONARIOS = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "data",
-    "funcionarios.pkl"
+from utils.staff_utils import (
+    carregar_funcionarios as _carregar,
+    salvar_funcionarios as _salvar,
+    hash_senha as _hash_senha,
+    gerar_id_funcionario as _gerar_id,
+    garantir_campos_funcionario as _garantir_campos,
 )
-
-
-def _hash_senha(senha):
-    return hashlib.sha256(senha.encode("utf-8")).hexdigest()
-
-
-def _carregar():
-    if os.path.exists(_CAMINHO_FUNCIONARIOS):
-        with open(_CAMINHO_FUNCIONARIOS, "rb") as f:
-            return pickle.load(f)
-    return []
-
-
-def _salvar(lista):
-    os.makedirs(os.path.dirname(_CAMINHO_FUNCIONARIOS), exist_ok=True)
-    with open(_CAMINHO_FUNCIONARIOS, "wb") as f:
-        pickle.dump(lista, f)
-
-
-def _gerar_id(lista):
-    numeros = []
-    for f in lista:
-        id_f = str(f.get('id_funcionario', ''))
-        if id_f.startswith('FUN-'):
-            try:
-                numeros.append(int(id_f.replace('FUN-', '')))
-            except ValueError:
-                pass
-    proximo = max(numeros) + 1 if numeros else 1
-    return f"FUN-{proximo:03d}"
-
-
-def _garantir_campos(func):
-    func.setdefault('id_funcionario', '')
-    func.setdefault('nome', '')
-    func.setdefault('cargo', '')
-    func.setdefault('telefone', '')
-    func.setdefault('email', '')
-    func.setdefault('endereco', '')
-    func.setdefault('valor_dia', 0.0)
-    func.setdefault('ativo', True)
-    func.setdefault('login', '')
-    func.setdefault('senha_hash', '')
-    func.setdefault('nivel_acesso', 'operador')
-    return func
 
 if 'funcionarios' not in st.session_state:
     st.session_state.funcionarios = [_garantir_campos(f) for f in _carregar()]

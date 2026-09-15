@@ -32,12 +32,12 @@ def carregar_caixa():
         caixa.setdefault("vendas_takeaway", 0.0)
         caixa.setdefault("vendas_delivery", 0.0)
         caixa.setdefault("reembolso", 0.0)
-        caixa.setdefault("estorno", 0.0)
         caixa.setdefault("pagamentos", [])
         caixa.setdefault("entradas", [])
         caixa.setdefault("saidas", [])
         caixa.setdefault("vendas_metodo", {})
         caixa.setdefault("fiados", [])
+        caixa.setdefault("estornos", [])
 
         return caixa
 
@@ -51,12 +51,12 @@ def carregar_caixa():
         "vendas_takeaway": 0.0,
         "vendas_delivery": 0.0,
         "reembolso": 0.0,
-        "estorno": 0.0,
         "pagamentos": [],
         "entradas": [],
         "saidas": [],
         "vendas_metodo": {},
-        "fiados": []
+        "fiados": [],
+        "estornos": []
     }
 
 
@@ -65,6 +65,7 @@ def salvar_caixa(caixa):
 
     caixa.setdefault("fiados", [])
     caixa.setdefault("vendas_takeaway", 0.0)
+    caixa.setdefault("estornos", [])
 
     with open(CAMINHO_CAIXA, "wb") as f:
         pickle.dump(caixa, f)
@@ -79,15 +80,10 @@ def carregar_produtos():
 
 
 def carregar_historico_caixa():
-    historico_path = os.path.join(
-        os.path.dirname(CAMINHO_CAIXA),
-        "historico_caixa.pkl"
-    )
-
-    if not os.path.exists(historico_path):
+    if not os.path.exists(CAMINHO_HISTORICO):
         return []
 
-    with open(historico_path, "rb") as f:
+    with open(CAMINHO_HISTORICO, "rb") as f:
         historico = pickle.load(f)
 
     if not isinstance(historico, list):
@@ -97,11 +93,6 @@ def carregar_historico_caixa():
 
 
 def salvar_historico_caixa(caixa):
-    historico_path = os.path.join(
-        os.path.dirname(CAMINHO_CAIXA),
-        "historico_caixa.pkl"
-    )
-
     historico = carregar_historico_caixa()
     data_abertura = caixa.get("data_abertura", "")
 
@@ -113,12 +104,218 @@ def salvar_historico_caixa(caixa):
 
     historico.append(caixa.copy())
 
-    os.makedirs(os.path.dirname(historico_path), exist_ok=True)
+    os.makedirs(os.path.dirname(CAMINHO_HISTORICO), exist_ok=True)
 
-    with open(historico_path, "wb") as f:
+    with open(CAMINHO_HISTORICO, "wb") as f:
         pickle.dump(historico, f)
 
     return True
+
+
+def calcular_saldo_caixa(caixa):
+    total_entradas = sum(
+        float(e.get("valor", 0)) for e in caixa.get("entradas", [])
+    )
+
+    total_estornos = sum(
+        float(e.get("valor_estornado", 0)) for e in caixa.get("estornos", [])
+    )
+
+    total_saidas = (
+        total_estornos
+        + float(caixa.get("reembolso", 0) or 0)
+        + float(caixa.get("estorno", 0) or 0)
+        + sum(float(p.get("valor", 0)) for p in caixa.get("pagamentos", []))
+        + sum(float(s.get("valor", 0)) for s in caixa.get("saidas", []))
+    )
+
+    saldo_final = (
+        float(caixa.get("saldo_inicial", 0) or 0)
+        + total_entradas
+        - total_saidas
+    )
+
+    return saldo_final, total_entradas, total_saidas
+
+
+def gerar_id_venda():
+    ano_mes = datetime.now().strftime("%y%m")
+    prefixo = f"VD{ano_mes}"
+
+    maior = 0
+
+    caixa = carregar_caixa()
+    for entrada in caixa.get("entradas", []):
+        id_v = str(entrada.get("id_venda", "") or "")
+        if id_v.startswith(prefixo):
+            try:
+                numero = int(id_v[len(prefixo):])
+                if numero > maior:
+                    maior = numero
+            except ValueError:
+                pass
+
+    for cx in carregar_historico_caixa():
+        for entrada in cx.get("entradas", []):
+            id_v = str(entrada.get("id_venda", "") or "")
+            if id_v.startswith(prefixo):
+                try:
+                    numero = int(id_v[len(prefixo):])
+                    if numero > maior:
+                        maior = numero
+                except ValueError:
+                    pass
+
+    return f"{prefixo}{maior + 1:04d}"
+
+
+def gerar_id_estorno():
+    ano_mes = datetime.now().strftime("%y%m")
+    prefixo = f"EST{ano_mes}"
+
+    maior = 0
+
+    caixa = carregar_caixa()
+    for estorno in caixa.get("estornos", []):
+        id_e = str(estorno.get("id_estorno", "") or "")
+        if id_e.startswith(prefixo):
+            try:
+                numero = int(id_e[len(prefixo):])
+                if numero > maior:
+                    maior = numero
+            except ValueError:
+                pass
+
+    for cx in carregar_historico_caixa():
+        for estorno in cx.get("estornos", []):
+            id_e = str(estorno.get("id_estorno", "") or "")
+            if id_e.startswith(prefixo):
+                try:
+                    numero = int(id_e[len(prefixo):])
+                    if numero > maior:
+                        maior = numero
+                except ValueError:
+                    pass
+
+    return f"{prefixo}{maior + 1:04d}"
+
+def listar_vendas_estornaveis(periodo="Hoje"):
+    from datetime import datetime, timedelta
+
+    agora = datetime.now()
+
+    if periodo == "Hoje":
+        corte = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif periodo == "Últimos 7 dias":
+        corte = agora - timedelta(days=7)
+    elif periodo == "Últimos 30 dias":
+        corte = agora - timedelta(days=30)
+    elif periodo == "Últimos 90 dias":
+        corte = agora - timedelta(days=90)
+    else:
+        corte = None
+
+    resultado = []
+    vistos = set()
+
+    def _adicionar(id_v, entrada, data_caixa):
+        if not id_v or id_v in vistos:
+            return
+        data_str = entrada.get("data", "")
+        if corte is not None:
+            try:
+                dt = datetime.strptime(data_str, "%d/%m/%Y %H:%M:%S")
+            except Exception:
+                try:
+                    dt = datetime.strptime(data_str, "%d/%m/%Y")
+                except Exception:
+                    return
+            if dt < corte:
+                return
+        vistos.add(id_v)
+        resultado.append({
+            "id_venda": id_v,
+            "categoria": entrada.get("categoria", ""),
+            "valor": float(entrada.get("valor", 0)),
+            "metodo": entrada.get("metodo", ""),
+            "descricao": entrada.get("descricao", ""),
+            "data": data_str,
+            "data_caixa": data_caixa,
+        })
+
+    for cx in carregar_historico_caixa():
+        data_caixa = cx.get("data_abertura", "")
+        for entrada in cx.get("entradas", []):
+            id_v = str(entrada.get("id_venda", "") or "")
+            _adicionar(id_v, entrada, data_caixa)
+
+    caixa_atual = carregar_caixa()
+    data_caixa = caixa_atual.get("data_abertura", "")
+    for entrada in caixa_atual.get("entradas", []):
+        id_v = str(entrada.get("id_venda", "") or "")
+        _adicionar(id_v, entrada, data_caixa)
+
+    resultado.sort(key=lambda x: x.get("data", ""), reverse=True)
+    return resultado
+
+
+def calcular_estornado_venda(id_venda):
+    total = 0.0
+
+    for cx in carregar_historico_caixa():
+        for estorno in cx.get("estornos", []):
+            if str(estorno.get("id_venda_original", "")) == str(id_venda):
+                total += float(estorno.get("valor_estornado", 0))
+
+    caixa = carregar_caixa()
+    for estorno in caixa.get("estornos", []):
+        if str(estorno.get("id_venda_original", "")) == str(id_venda):
+            total += float(estorno.get("valor_estornado", 0))
+
+    return round(total, 2)
+
+
+def _aplicar_venda_nos_totais(caixa, entrada):
+    categoria = entrada.get("categoria", "")
+    metodo = entrada.get("metodo", "")
+    valor = float(entrada.get("valor", 0.0))
+
+    if categoria == "Mesa":
+        caixa["vendas_mesa"] = caixa.get("vendas_mesa", 0.0) + valor
+    elif categoria == "Takeaway":
+        caixa["vendas_takeaway"] = caixa.get("vendas_takeaway", 0.0) + valor
+    elif categoria in ["Balcão", "Bar", "Avulso"]:
+        caixa["vendas_balcao"] = caixa.get("vendas_balcao", 0.0) + valor
+    elif categoria == "Delivery":
+        caixa["vendas_delivery"] = caixa.get("vendas_delivery", 0.0) + valor
+
+    if metodo:
+        caixa.setdefault("vendas_metodo", {})
+        caixa["vendas_metodo"][metodo] = (
+            caixa["vendas_metodo"].get(metodo, 0.0) + valor
+        )
+
+
+def _remover_venda_dos_totais(caixa, entrada):
+    categoria = entrada.get("categoria", "")
+    metodo = entrada.get("metodo", "")
+    valor = float(entrada.get("valor", 0.0))
+
+    if categoria == "Mesa":
+        caixa["vendas_mesa"] = caixa.get("vendas_mesa", 0.0) - valor
+    elif categoria == "Takeaway":
+        caixa["vendas_takeaway"] = caixa.get("vendas_takeaway", 0.0) - valor
+    elif categoria in ["Balcão", "Bar", "Avulso"]:
+        caixa["vendas_balcao"] = caixa.get("vendas_balcao", 0.0) - valor
+    elif categoria == "Delivery":
+        caixa["vendas_delivery"] = caixa.get("vendas_delivery", 0.0) - valor
+
+    if metodo and metodo in caixa.get("vendas_metodo", {}):
+        caixa["vendas_metodo"][metodo] = (
+            caixa["vendas_metodo"].get(metodo, 0.0) - valor
+        )
+        if abs(caixa["vendas_metodo"][metodo]) < 1e-9:
+            caixa["vendas_metodo"][metodo] = 0.0
 
 
 def registrar_venda_no_caixa(categoria, valor, metodo, descricao, itens=None):
@@ -172,6 +369,7 @@ def registrar_venda_no_caixa(categoria, valor, metodo, descricao, itens=None):
         caixa.setdefault("fiados", [])
 
         id_fiado = len(caixa["fiados"]) + 1
+        id_venda = gerar_id_venda()
 
         caixa["fiados"].append({
             "id": id_fiado,
@@ -181,7 +379,8 @@ def registrar_venda_no_caixa(categoria, valor, metodo, descricao, itens=None):
             "status": "pendente",
             "itens": descricao,
             "tipo": categoria,
-            "metodo": "Fiado"
+            "metodo": "Fiado",
+            "id_venda": id_venda
         })
 
         salvar_caixa(caixa)
@@ -190,31 +389,70 @@ def registrar_venda_no_caixa(categoria, valor, metodo, descricao, itens=None):
         if "caixa" in st.session_state:
             st.session_state.caixa = caixa
 
-        return caixa
+        return caixa, id_venda
 
     caixa.setdefault("entradas", [])
     caixa.setdefault("vendas_metodo", {})
 
-    caixa["entradas"].append({
+    id_venda = gerar_id_venda()
+
+    entrada = {
+        "id_venda": id_venda,
         "categoria": categoria,
         "valor": valor,
         "metodo": metodo,
         "descricao": descricao,
         "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    })
+    }
 
-    if categoria == "Mesa":
-        caixa["vendas_mesa"] += valor
-    elif categoria == "Takeaway":
-        caixa["vendas_takeaway"] += valor
-    elif categoria in ["Balcão", "Bar", "Avulso"]:
-        caixa["vendas_balcao"] += valor
-    elif categoria == "Delivery":
-        caixa["vendas_delivery"] += valor
+    caixa["entradas"].append(entrada)
+    _aplicar_venda_nos_totais(caixa, entrada)
 
-    caixa["vendas_metodo"][metodo] = (
-        caixa["vendas_metodo"].get(metodo, 0.0) + valor
-    )
+    salvar_caixa(caixa)
+    salvar_historico_caixa(caixa)
+
+    if "caixa" in st.session_state:
+        st.session_state.caixa = caixa
+
+    return caixa, id_venda
+
+
+def substituir_venda_no_caixa(id_venda, categoria, valor, metodo, descricao):
+    caixa = carregar_caixa()
+    caixa.setdefault("entradas", [])
+    caixa.setdefault("vendas_metodo", {})
+
+    idx = None
+    for i, entrada in enumerate(caixa["entradas"]):
+        if str(entrada.get("id_venda", "")) == str(id_venda):
+            idx = i
+            break
+
+    if idx is None:
+        entrada_nova = {
+            "id_venda": id_venda,
+            "categoria": categoria,
+            "valor": valor,
+            "metodo": metodo,
+            "descricao": descricao,
+            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        }
+        caixa["entradas"].append(entrada_nova)
+        _aplicar_venda_nos_totais(caixa, entrada_nova)
+    else:
+        antiga = caixa["entradas"][idx]
+        _remover_venda_dos_totais(caixa, antiga)
+
+        nova = {
+            "id_venda": id_venda,
+            "categoria": categoria,
+            "valor": valor,
+            "metodo": metodo,
+            "descricao": descricao,
+            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        }
+        caixa["entradas"][idx] = nova
+        _aplicar_venda_nos_totais(caixa, nova)
 
     salvar_caixa(caixa)
     salvar_historico_caixa(caixa)
@@ -223,6 +461,67 @@ def registrar_venda_no_caixa(categoria, valor, metodo, descricao, itens=None):
         st.session_state.caixa = caixa
 
     return caixa
+
+
+def registrar_estorno(id_venda_original, valor_estornado, metodo, motivo, classificacao='outros'):
+    venda = None
+
+    for cx in carregar_historico_caixa():
+        for entrada in cx.get("entradas", []):
+            if str(entrada.get("id_venda", "")) == str(id_venda_original):
+                venda = entrada
+                break
+        if venda:
+            break
+
+    if venda is None:
+        caixa_atual = carregar_caixa()
+        for entrada in caixa_atual.get("entradas", []):
+            if str(entrada.get("id_venda", "")) == str(id_venda_original):
+                venda = entrada
+                break
+
+    if venda is None:
+        return False, "Venda original não encontrada"
+
+    valor_venda = float(venda.get("valor", 0))
+    ja_estornado = calcular_estornado_venda(id_venda_original)
+    disponivel = round(valor_venda - ja_estornado, 2)
+
+    valor_estornado = float(valor_estornado)
+
+    if valor_estornado <= 0:
+        return False, "Valor do estorno deve ser maior que zero"
+
+    if valor_estornado > disponivel:
+        return False, f"Valor excede o disponível para estorno (R$ {disponivel:.2f})"
+
+    caixa = carregar_caixa()
+    caixa.setdefault("estornos", [])
+
+    id_estorno = gerar_id_estorno()
+
+    tipo = "total" if abs(valor_estornado - disponivel) < 1e-9 else "parcial"
+
+    caixa["estornos"].append({
+        "id_estorno": id_estorno,
+        "id_venda_original": id_venda_original,
+        "valor_estornado": round(valor_estornado, 2),
+        "valor_venda_original": round(valor_venda, 2),
+        "tipo": tipo,
+        "metodo": metodo,
+        "motivo": motivo,
+        "classificacao": classificacao,
+        "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    })
+
+    salvar_caixa(caixa)
+    salvar_historico_caixa(caixa)
+
+    if "caixa" in st.session_state:
+        st.session_state.caixa = caixa
+
+    return True, id_estorno
 
 
 def resetar_caixa():
@@ -236,12 +535,12 @@ def resetar_caixa():
         "vendas_takeaway": 0.0,
         "vendas_delivery": 0.0,
         "reembolso": 0.0,
-        "estorno": 0.0,
         "pagamentos": [],
         "entradas": [],
         "saidas": [],
         "vendas_metodo": {},
-        "fiados": []
+        "fiados": [],
+        "estornos": []
     }
 
     salvar_caixa(caixa)
@@ -258,8 +557,7 @@ def atualizar_historico_caixa(caixa):
     data_abertura = caixa.get("data_abertura", "")
 
     historico = [
-        h
-        for h in historico
+        h for h in historico
         if h.get("data_abertura") != data_abertura
     ]
 
@@ -309,10 +607,10 @@ def garantir_estrutura_caixa(caixa):
     if "reembolso" not in caixa:
         caixa["reembolso"] = 0.0
 
-    if "estorno" not in caixa:
-        caixa["estorno"] = 0.0
-
     if "saldo_inicial" not in caixa:
         caixa["saldo_inicial"] = 0.0
+
+    if "estornos" not in caixa:
+        caixa["estornos"] = []
 
     return caixa

@@ -1,31 +1,12 @@
 import streamlit as st
-import hashlib
-import os
-import pickle
 import time
 from pathlib import Path
 
-
-_CAMINHO_FUNCIONARIOS = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "data",
-    "funcionarios.pkl"
+from utils.staff_utils import (
+    carregar_funcionarios_com_admin as _carregar_funcionarios,
+    hash_senha as _hash_senha,
 )
 
-ADMIN_FIXO = {
-    'id_funcionario': 'FUN-000',
-    'nome': 'Admin Master',
-    'cargo': 'Gerente',
-    'telefone': '',
-    'email': '',
-    'endereco': '',
-    'valor_dia': 0.0,
-    'ativo': True,
-    'login': 'admin',
-    'senha_hash': hashlib.sha256('GordonAdmin$'.encode('utf-8')).hexdigest(),
-    'nivel_acesso': 'admin',
-    'fixo': True
-}
 
 PERMISSOES = {
     'admin': [
@@ -34,38 +15,6 @@ PERMISSOES = {
     ],
     'operador': ['pedidos']
 }
-
-
-def _hash_senha(senha):
-    return hashlib.sha256(senha.encode("utf-8")).hexdigest()
-
-
-def _garantir_admin_fixo(funcionarios):
-    for i, f in enumerate(funcionarios):
-        if f.get('login', '').strip().lower() == 'admin':
-            funcionarios[i] = ADMIN_FIXO.copy()
-            return funcionarios
-    funcionarios.insert(0, ADMIN_FIXO.copy())
-    return funcionarios
-
-
-def _salvar_funcionarios(funcionarios):
-    os.makedirs(os.path.dirname(_CAMINHO_FUNCIONARIOS), exist_ok=True)
-    with open(_CAMINHO_FUNCIONARIOS, "wb") as f:
-        pickle.dump(funcionarios, f)
-
-
-def _carregar_funcionarios():
-    if os.path.exists(_CAMINHO_FUNCIONARIOS):
-        with open(_CAMINHO_FUNCIONARIOS, "rb") as f:
-            funcionarios = pickle.load(f)
-        funcionarios = _garantir_admin_fixo(funcionarios)
-        _salvar_funcionarios(funcionarios)
-        return funcionarios
-
-    funcionarios = [ADMIN_FIXO.copy()]
-    _salvar_funcionarios(funcionarios)
-    return funcionarios
 
 
 def autenticar(login, senha):

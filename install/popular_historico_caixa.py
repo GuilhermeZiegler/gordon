@@ -16,6 +16,10 @@ def _parse_dt(s):
     return datetime.strptime(s, "%d/%m/%Y %H:%M:%S")
 
 
+def _gerar_id_venda(ano_mes, seq):
+    return f"VD{ano_mes}{seq:04d}"
+
+
 def popular_historico_caixa():
     random.seed(42)
 
@@ -38,18 +42,20 @@ def popular_historico_caixa():
     fiados_rolados = []
     seq_fiado = 1
 
+    seq_venda_por_mes = defaultdict(int)
+
     for dia in dias_ordenados:
         itens_dia = pedidos_por_dia[dia]
         data_str = dia.strftime("%d/%m/%Y")
+        ano_mes = dia.strftime("%y%m")
 
-        # ================== VENDAS DO DIA ==================
         vendas_mesa = 0.0
         vendas_takeaway = 0.0
         vendas_delivery = 0.0
         vendas_balcao = 0.0
 
         vendas_metodo = defaultdict(float)
-        entradas_por_origem = defaultdict(float)
+        entradas = []
         pedidos_agrupados = defaultdict(list)
 
         for item in itens_dia:
@@ -77,7 +83,13 @@ def popular_historico_caixa():
             else:
                 continue
 
+            if valor_total <= 0:
+                continue
+
             if metodo == 'Fiado':
+                seq_venda_por_mes[ano_mes] += 1
+                id_venda = _gerar_id_venda(ano_mes, seq_venda_por_mes[ano_mes])
+
                 novos_fiados.append({
                     'id': seq_fiado,
                     'cliente': f"Fiado {id_pedido}",
@@ -86,28 +98,44 @@ def popular_historico_caixa():
                     'status': 'pendente',
                     'itens': ', '.join([f"{i['quantidade']}x {i['nome_prod']}" for i in itens]),
                     'tipo': origem.capitalize(),
-                    'metodo': 'Fiado'
+                    'metodo': 'Fiado',
+                    'id_venda': id_venda
                 })
                 seq_fiado += 1
                 continue
 
+            categoria_entrada = ''
             if origem == 'mesa':
                 vendas_mesa += valor_total
-                entradas_por_origem['Mesa'] += valor_total
+                categoria_entrada = 'Mesa'
             elif origem == 'takeaway':
                 vendas_takeaway += valor_total
-                entradas_por_origem['Takeaway'] += valor_total
+                categoria_entrada = 'Takeaway'
             elif origem == 'delivery':
                 vendas_delivery += valor_total
-                entradas_por_origem['Delivery'] += valor_total
+                categoria_entrada = 'Delivery'
             elif origem == 'caixa':
                 vendas_balcao += valor_total
-                entradas_por_origem['Balcão'] += valor_total
+                categoria_entrada = 'Balcão'
 
             if metodo:
                 vendas_metodo[metodo] += valor_total
 
-        # ================== QUITAÇÃO DE FIADOS ==================
+            seq_venda_por_mes[ano_mes] += 1
+            id_venda = _gerar_id_venda(ano_mes, seq_venda_por_mes[ano_mes])
+
+            entrada_dt = _parse_dt(itens[0]['criado_em']) + timedelta(minutes=random.randint(30, 90))
+            entrada_data = entrada_dt.strftime("%d/%m/%Y %H:%M:%S")
+
+            entradas.append({
+                'id_venda': id_venda,
+                'categoria': categoria_entrada,
+                'valor': round(valor_total, 2),
+                'metodo': metodo,
+                'descricao': f"{categoria_entrada} - Pedido {id_pedido}",
+                'data': entrada_data
+            })
+
         fiados_pendentes_agora = []
         for fiado in fiados_rolados:
             if fiado.get('status') != 'pendente':
@@ -119,29 +147,25 @@ def popular_historico_caixa():
 
                 vendas_balcao += fiado['valor']
                 vendas_metodo['Fiado'] += fiado['valor']
-                entradas_por_origem['Quitação Fiado'] += fiado['valor']
+
+                seq_venda_por_mes[ano_mes] += 1
+                id_venda = _gerar_id_venda(ano_mes, seq_venda_por_mes[ano_mes])
+
+                entradas.append({
+                    'id_venda': id_venda,
+                    'categoria': 'Quitação Fiado',
+                    'valor': round(fiado['valor'], 2),
+                    'metodo': 'Fiado',
+                    'descricao': f"Quitação - {fiado['cliente']}",
+                    'data': data_pag
+                })
             else:
                 fiados_pendentes_agora.append(fiado)
 
         fiados_dia = fiados_pendentes_agora + novos_fiados
 
-        # ================== SALDO INICIAL ==================
         saldo_inicial = random.randint(100, 500)
 
-        # ================== ENTRADAS ==================
-        entradas = []
-        for categoria, valor in entradas_por_origem.items():
-            if valor <= 0:
-                continue
-            entradas.append({
-                'categoria': categoria,
-                'valor': round(valor, 2),
-                'metodo': 'Diversos',
-                'descricao': f"Vendas {categoria.lower()} - {data_str}",
-                'data': f"{data_str} 22:00:00"
-            })
-
-        # ================== SAÍDAS ==================
         saidas = []
         if random.random() < 0.20:
             saidas.append({
@@ -151,7 +175,6 @@ def popular_historico_caixa():
                 'metodo': 'Dinheiro'
             })
 
-        # ================== PAGAMENTOS ==================
         pagamentos = []
         if dia.weekday() == DIAS_SEMANA_PAGAMENTO:
             for func in random.sample(FORNECEDORES_PAGAMENTO, random.randint(2, 4)):
@@ -163,11 +186,8 @@ def popular_historico_caixa():
                     'metodo': 'Dinheiro'
                 })
 
-        # ================== REEMBOLSO / ESTORNO ==================
         reembolso = round(random.uniform(0, 30), 2) if random.random() < 0.10 else 0.0
-        estorno = round(random.uniform(0, 20), 2) if random.random() < 0.05 else 0.0
 
-        # ================== SNAPSHOT ==================
         historico_caixa.append({
             'saldo_inicial': saldo_inicial,
             'data_abertura': f"{data_str} 08:00:00",
@@ -178,12 +198,12 @@ def popular_historico_caixa():
             'vendas_delivery': round(vendas_delivery, 2),
             'vendas_takeaway': round(vendas_takeaway, 2),
             'reembolso': reembolso,
-            'estorno': estorno,
             'pagamentos': pagamentos,
             'entradas': entradas,
             'saidas': saidas,
             'vendas_metodo': {k: round(v, 2) for k, v in vendas_metodo.items()},
-            'fiados': fiados_dia
+            'fiados': fiados_dia,
+            'estornos': []
         })
 
         fiados_rolados = [f for f in fiados_dia if f.get('status') == 'pendente']
