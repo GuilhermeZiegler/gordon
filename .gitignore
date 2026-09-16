@@ -46,3 +46,4 @@ install.md
 teste*.py
 teste*.ipynb
 uv.lock
+pyproject.toml
