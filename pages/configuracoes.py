@@ -1,52 +1,70 @@
 import streamlit as st
-import os
 import json
 import time
 import requests
 from datetime import datetime
-from utils.print import listar_impressoras, imprimir_ticket
+
+from utils.print import imprimir_rede
+from utils.db import ler_tabela, executar
 
 from components.auth import exigir_permissao
 exigir_permissao("configuracoes")
 
 
-ARQUIVO_CONFIG = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "config.json")
+CONFIG_PADRAO = {
+    "impressora_cozinha": "",
+    "impressora_salao": "",
+    "impressora_comanda": "",
+    "max_mesas": 50,
+    "empresa": {
+        "nome": "",
+        "email_contato": "",
+        "telefone": "",
+        "cnpj": ""
+    }
+}
 
 
 def carregar_config():
-    if os.path.exists(ARQUIVO_CONFIG):
-        with open(ARQUIVO_CONFIG, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {
-        "impressora_cozinha": "",
-        "impressora_salao": "",
-        "impressora_comanda": "",
-        "max_mesas": 50,
-        "empresa": {
-            "nome": "",
-            "email_contato": "",
-            "telefone": "",
-            "cnpj": ""
-        }
-    }
+    try:
+        df = ler_tabela("config")
+
+        if df.empty or "dados" not in df.columns:
+            return CONFIG_PADRAO.copy()
+
+        valor = df["dados"].iloc[0]
+
+        if valor is None:
+            return CONFIG_PADRAO.copy()
+
+        if isinstance(valor, dict):
+            dados = valor
+        elif isinstance(valor, str):
+            dados = json.loads(valor)
+        else:
+            return CONFIG_PADRAO.copy()
+
+        for k, v in CONFIG_PADRAO.items():
+            if k not in dados:
+                dados[k] = v
+
+        return dados
+    except Exception:
+        return CONFIG_PADRAO.copy()
 
 
 def salvar_config(config):
-    os.makedirs(os.path.dirname(ARQUIVO_CONFIG), exist_ok=True)
-    with open(ARQUIVO_CONFIG, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
+    payload = json.dumps(config, ensure_ascii=False)
+
+    executar('TRUNCATE TABLE "config"')
+    executar('INSERT INTO "config" (dados) VALUES (:d)', {"d": payload})
 
 
 if 'config' not in st.session_state:
     st.session_state.config = carregar_config()
 
 if 'empresa' not in st.session_state.config:
-    st.session_state.config['empresa'] = {
-        "nome": "",
-        "email_contato": "",
-        "telefone": "",
-        "cnpj": ""
-    }
+    st.session_state.config['empresa'] = CONFIG_PADRAO['empresa'].copy()
 
 if 'max_mesas' not in st.session_state.config:
     st.session_state.config['max_mesas'] = 50
@@ -65,83 +83,131 @@ aba_impressoras, aba_empresa, aba_integracoes = st.tabs([
 # ABA IMPRESSORAS
 # ============================================================
 with aba_impressoras:
-    st.subheader("🖨️ Impressoras")
+    st.subheader("🖨️ Impressoras de Rede")
 
-    impressoras_disponiveis = listar_impressoras()
-
-    if not impressoras_disponiveis:
-        st.warning("⚠️ Nenhuma impressora encontrada no sistema. Verifique se as impressoras estão conectadas.")
-    else:
-        st.success(f"✅ {len(impressoras_disponiveis)} impressora(s) encontrada(s) no sistema.")
+    st.caption(
+        "Endereço no formato `host:porta`. "
+        "Ex: `100.64.0.5:9100` (Tailscale) ou `192.168.1.50:9100` (rede local). "
+        "Se omitir a porta, assume `9100`. "
+        "Deixe vazio para gerar PDF."
+    )
 
     st.divider()
 
-    st.subheader("🍳 Impressora da Cozinha")
-    if impressoras_disponiveis:
-        impressora_cozinha = st.selectbox(
-            "Selecione a impressora para os pedidos da cozinha:",
-            impressoras_disponiveis,
-            index=impressoras_disponiveis.index(st.session_state.config.get("impressora_cozinha", ""))
-            if st.session_state.config.get("impressora_cozinha", "") in impressoras_disponiveis else 0,
-            key="config_impressora_cozinha"
-        )
-    else:
-        impressora_cozinha = st.text_input(
-            "Nome da impressora da cozinha (digite manualmente):",
+    # ---------------- COZINHA ----------------
+    st.markdown("**🍳 Impressora da Cozinha**")
+    col_c1, col_c2 = st.columns([5, 1])
+    with col_c1:
+        imp_cozinha = st.text_input(
+            "Cozinha",
             value=st.session_state.config.get("impressora_cozinha", ""),
-            key="config_impressora_cozinha_manual"
+            placeholder="100.64.0.5:9100",
+            key="config_imp_cozinha",
+            label_visibility="collapsed"
         )
+    with col_c2:
+        if st.button("Testar", key="testar_cozinha", use_container_width=True):
+            if not imp_cozinha.strip():
+                st.warning("Informe o endereço.")
+            else:
+                ok = imprimir_rede(
+                    "\n========================================\n"
+                    "           TESTE COZINHA\n"
+                    "========================================\n"
+                    f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                    f"Destino: {imp_cozinha}\n"
+                    "----------------------------------------\n"
+                    "Impressora OK.\n"
+                    "========================================\n\n",
+                    imp_cozinha
+                )
+                if ok:
+                    st.success("✅ Impressora respondeu.")
+                else:
+                    st.error("❌ Falha ao conectar.")
 
-    st.subheader("Impressora do Salão")
-    if impressoras_disponiveis:
-        impressora_salao = st.selectbox(
-            "Selecione a impressora para o salão (comandas):",
-            impressoras_disponiveis,
-            index=impressoras_disponiveis.index(st.session_state.config.get("impressora_salao", ""))
-            if st.session_state.config.get("impressora_salao", "") in impressoras_disponiveis else 0,
-            key="config_impressora_salao"
-        )
-    else:
-        impressora_salao = st.text_input(
-            "Nome da impressora do salão (digite manualmente):",
+    # ---------------- SALÃO ----------------
+    st.markdown("**🍽️ Impressora do Salão**")
+    col_s1, col_s2 = st.columns([5, 1])
+    with col_s1:
+        imp_salao = st.text_input(
+            "Salão",
             value=st.session_state.config.get("impressora_salao", ""),
-            key="config_impressora_salao_manual"
+            placeholder="100.64.0.6:9100",
+            key="config_imp_salao",
+            label_visibility="collapsed"
         )
+    with col_s2:
+        if st.button("Testar", key="testar_salao", use_container_width=True):
+            if not imp_salao.strip():
+                st.warning("Informe o endereço.")
+            else:
+                ok = imprimir_rede(
+                    "\n========================================\n"
+                    "            TESTE SALÃO\n"
+                    "========================================\n"
+                    f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                    f"Destino: {imp_salao}\n"
+                    "----------------------------------------\n"
+                    "Impressora OK.\n"
+                    "========================================\n\n",
+                    imp_salao
+                )
+                if ok:
+                    st.success("✅ Impressora respondeu.")
+                else:
+                    st.error("❌ Falha ao conectar.")
 
-    st.subheader("Impressora de Comandas")
-    if impressoras_disponiveis:
-        impressora_comanda = st.selectbox(
-            "Selecione a impressora para comandas (opcional):",
-            [""] + impressoras_disponiveis,
-            index=([""] + impressoras_disponiveis).index(st.session_state.config.get("impressora_comanda", ""))
-            if st.session_state.config.get("impressora_comanda", "") in [""] + impressoras_disponiveis else 0,
-            key="config_impressora_comanda"
-        )
-    else:
-        impressora_comanda = st.text_input(
-            "Nome da impressora de comandas (opcional, deixe vazio para não usar):",
+    # ---------------- COMANDAS ----------------
+    st.markdown("**🧾 Impressora de Comandas**")
+    col_cm1, col_cm2 = st.columns([5, 1])
+    with col_cm1:
+        imp_comanda = st.text_input(
+            "Comandas",
             value=st.session_state.config.get("impressora_comanda", ""),
-            key="config_impressora_comanda_manual"
+            placeholder="100.64.0.7:9100",
+            key="config_imp_comanda",
+            label_visibility="collapsed"
         )
+    with col_cm2:
+        if st.button("Testar", key="testar_comanda", use_container_width=True):
+            if not imp_comanda.strip():
+                st.warning("Informe o endereço.")
+            else:
+                ok = imprimir_rede(
+                    "\n========================================\n"
+                    "          TESTE COMANDAS\n"
+                    "========================================\n"
+                    f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                    f"Destino: {imp_comanda}\n"
+                    "----------------------------------------\n"
+                    "Impressora OK.\n"
+                    "========================================\n\n",
+                    imp_comanda
+                )
+                if ok:
+                    st.success("✅ Impressora respondeu.")
+                else:
+                    st.error("❌ Falha ao conectar.")
 
-    st.caption("💡 Deixe vazio para não usar impressora de comandas.")
+    st.caption("💡 Deixe a impressora de comandas vazio para não usar.")
 
     st.divider()
 
-    col_salvar1, col_salvar2, col_salvar3 = st.columns([1, 2, 1])
-    with col_salvar2:
+    col_sv1, col_sv2, col_sv3 = st.columns([1, 2, 1])
+    with col_sv2:
         if st.button("💾 Salvar Impressoras", use_container_width=True, type="primary", key="salvar_impressoras"):
-            st.session_state.config["impressora_cozinha"] = impressora_cozinha if impressora_cozinha else ""
-            st.session_state.config["impressora_salao"] = impressora_salao if impressora_salao else ""
-            st.session_state.config["impressora_comanda"] = impressora_comanda if impressora_comanda else ""
+            st.session_state.config["impressora_cozinha"] = imp_cozinha.strip()
+            st.session_state.config["impressora_salao"] = imp_salao.strip()
+            st.session_state.config["impressora_comanda"] = imp_comanda.strip()
 
             salvar_config(st.session_state.config)
 
-            st.session_state.impressora_cozinha = st.session_state.config["impressora_cozinha"]
-            st.session_state.impressora_salao = st.session_state.config["impressora_salao"]
-            st.session_state.impressora_comanda = st.session_state.config["impressora_comanda"]
+            st.session_state.impressora_cozinha = imp_cozinha.strip()
+            st.session_state.impressora_salao = imp_salao.strip()
+            st.session_state.impressora_comanda = imp_comanda.strip()
 
-            st.success("✅ Configurações salvas com sucesso!")
+            st.success("✅ Configurações salvas!")
             time.sleep(0.5)
             st.rerun()
 
@@ -150,47 +216,13 @@ with aba_impressoras:
 
     config_atual = carregar_config()
 
-    col_atual1, col_atual2, col_atual3 = st.columns(3)
-    with col_atual1:
-        st.info(f"**Cozinha:** {config_atual.get('impressora_cozinha', 'Nenhuma') or 'Nenhuma'}")
-    with col_atual2:
-        st.info(f"**Salão:** {config_atual.get('impressora_salao', 'Nenhuma') or 'Nenhuma'}")
-    with col_atual3:
-        st.info(f"**Comandas:** {config_atual.get('impressora_comanda', 'Nenhuma') or 'Nenhuma'}")
-
-    st.divider()
-    st.subheader("Testar Impressora")
-
-    col_testar1, col_testar2, col_testar3 = st.columns([1, 2, 1])
-    with col_testar2:
-        impressora_teste = st.selectbox(
-            "Selecione a impressora para testar:",
-            impressoras_disponiveis if impressoras_disponiveis else ["Nenhuma impressora disponível"],
-            key="testar_impressora"
-        )
-
-        if st.button("Testar Impressora", use_container_width=True):
-            if impressora_teste and impressora_teste != "Nenhuma impressora disponível":
-                teste = f"""
-                    {"="*40}
-                    TESTE DE IMPRESSÃO
-                    {"="*40}
-                    Data: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-                    Impressora: {impressora_teste}
-                    {"-"*40}
-                    Este é um teste de impressão.
-
-                    Se você está vendo esta mensagem,
-                    a impressora está funcionando corretamente!
-                    {"="*40}
-                    """
-                sucesso = imprimir_ticket(teste, impressora_teste)
-                if sucesso:
-                    st.success(f"✅ Teste enviado para a impressora **{impressora_teste}**!")
-                else:
-                    st.error(f"❌ Falha ao testar a impressora **{impressora_teste}**. Verifique a conexão.")
-            else:
-                st.warning("⚠️ Selecione uma impressora válida para testar.")
+    col_a1, col_a2, col_a3 = st.columns(3)
+    with col_a1:
+        st.info(f"**Cozinha:** {config_atual.get('impressora_cozinha') or 'Nenhuma'}")
+    with col_a2:
+        st.info(f"**Salão:** {config_atual.get('impressora_salao') or 'Nenhuma'}")
+    with col_a3:
+        st.info(f"**Comandas:** {config_atual.get('impressora_comanda') or 'Nenhuma'}")
 
 
 # ============================================================
@@ -244,8 +276,8 @@ with aba_empresa:
 
     st.divider()
 
-    col_salvar1, col_salvar2, col_salvar3 = st.columns([1, 2, 1])
-    with col_salvar2:
+    col_sv1, col_sv2, col_sv3 = st.columns([1, 2, 1])
+    with col_sv2:
         if st.button("💾 Salvar Empresa", use_container_width=True, type="primary", key="salvar_empresa"):
             st.session_state.config['empresa'] = {
                 'nome': nome_empresa.strip(),
