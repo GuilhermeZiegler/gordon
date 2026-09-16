@@ -19,7 +19,7 @@ from components.card_descontos import (
     renderizar_estilo_cards
 )
 
-from utils.paths import get_caminhos
+from utils.db import ler_tabela
 from utils.staff_utils import carregar_funcionarios
 from utils.mesas_utils import (
     COLUNAS_MESAS,
@@ -1920,18 +1920,14 @@ with aba2:
 
 with aba3:
 
-    with open(
-        os.path.join(
-            os.path.dirname(
-                os.path.dirname(__file__)
-            ),
-            "data",
-            "historico_mesas.pkl"
-        ),
-        'rb'
-    ) as f:
+    from utils.db import ler_tabela
 
-        historico_mesas = pickle.load(f)
+    df_hist_mesas = ler_tabela("historico_mesas")
+
+    if df_hist_mesas.empty:
+        historico_mesas = []
+    else:
+        historico_mesas = df_hist_mesas.to_dict(orient="records")
 
     hoje = datetime.now().strftime("%d/%m/%Y")
 
@@ -1965,37 +1961,21 @@ with aba3:
                 comanda_selecionada.split(" - ")[0]
             )
 
-            mesa_historico = [
+            candidatos = [
                 m
                 for m in comandas_hoje
                 if m['id_mesa'] == id_mesa_selecionada
-            ][0]
+            ]
+
+            candidatos.sort(key=lambda x: x.get('fechado_em', ''), reverse=True)
+
+            mesa_historico = candidatos[0]
 
             mesa_df = pd.DataFrame([
                 mesa_historico
             ])
 
-            with open(
-                os.path.join(
-                    os.path.dirname(
-                        os.path.dirname(__file__)
-                    ),
-                    "data",
-                    "historico_pedidos.pkl"
-                ),
-                'rb'
-            ) as f:
-
-                historico_pedidos = pickle.load(f)
-
-            if isinstance(
-                historico_pedidos,
-                list
-            ):
-
-                historico_pedidos = pd.DataFrame(
-                    historico_pedidos
-                )
+            historico_pedidos = ler_tabela("historico_pedidos")
 
             pedidos_df = historico_pedidos[
                 historico_pedidos[

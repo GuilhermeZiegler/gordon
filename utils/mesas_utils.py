@@ -1,21 +1,16 @@
 import pandas as pd
-import os
-import pickle
 from datetime import datetime
 import streamlit as st
 
-from utils.paths import get_caminhos
+from utils.db import ler_tabela, escrever_tabela, inserir_linha, executar
 
-
-_c = get_caminhos()
-CAMINHO_MESAS_PKL = _c["mesas"].replace('.xlsx', '.pkl')
-CAMINHO_PEDIDOS_PKL = _c["pedidos"].replace('.xlsx', '.pkl')
 
 COLUNAS_MESAS = [
     'id_mesa', 'status', 'garcom', 'qtd_clientes', 'aberto_em', 'fechado_em',
     'valor_pedidos', 'valor_total', 'valor_com_desconto', 'desconto_valor',
     'valor_10', 'ticket_medio', 'cover', 'incluir_10', 'id_venda_caixa'
 ]
+
 
 def filtrar_pedidos_por_sessao(mesa_id, pedidos_df, aberto_em_str, fechado_em_str):
     if pedidos_df.empty:
@@ -81,51 +76,49 @@ def calcular_valores_mesa(mesa_id, pedidos_df, aberto_em_str, fechado_em_str, ap
 
 
 def carregar_mesas():
-    if os.path.exists(CAMINHO_MESAS_PKL):
-        with open(CAMINHO_MESAS_PKL, 'rb') as f:
-            df = pickle.load(f)
+    df = ler_tabela("mesas")
 
-        if 'qtd_clientes' in df.columns:
-            df['qtd_clientes'] = pd.to_numeric(
-                df['qtd_clientes'],
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_MESAS)
+
+    if 'qtd_clientes' in df.columns:
+        df['qtd_clientes'] = pd.to_numeric(
+            df['qtd_clientes'],
+            errors='coerce'
+        ).fillna(0).astype(int)
+
+    for coluna in [
+        'cover',
+        'valor_pedidos',
+        'valor_total',
+        'valor_com_desconto',
+        'desconto_valor',
+        'valor_10',
+        'ticket_medio'
+    ]:
+        if coluna in df.columns:
+            df[coluna] = pd.to_numeric(
+                df[coluna],
                 errors='coerce'
-            ).fillna(0).astype(int)
+            ).fillna(0.0)
 
-        for coluna in [
-            'cover',
-            'valor_pedidos',
-            'valor_total',
-            'valor_com_desconto',
-            'desconto_valor',
-            'valor_10',
-            'ticket_medio'
-        ]:
-            if coluna in df.columns:
-                df[coluna] = pd.to_numeric(
-                    df[coluna],
-                    errors='coerce'
-                ).fillna(0.0)
+    if 'incluir_10' in df.columns:
+        df['incluir_10'] = df['incluir_10'].fillna(False)
 
-        if 'incluir_10' in df.columns:
-            df['incluir_10'] = df['incluir_10'].fillna(False)
+    if 'id_venda_caixa' not in df.columns:
+        df['id_venda_caixa'] = ''
 
-        if 'id_venda_caixa' not in df.columns:
-            df['id_venda_caixa'] = ''
+    for coluna in COLUNAS_MESAS:
+        if coluna not in df.columns:
+            df[coluna] = ''
 
-        return df
-
-    return pd.DataFrame(columns=COLUNAS_MESAS)
+    return df
 
 
 def salvar_mesas(df):
     try:
-        os.makedirs(os.path.dirname(CAMINHO_MESAS_PKL), exist_ok=True)
-
-        with open(CAMINHO_MESAS_PKL, 'wb') as f:
-            pickle.dump(df, f)
-
+        escrever_tabela("mesas", df)
         return True
-
     except Exception as e:
         st.error(f"⚠️ Erro ao salvar mesas: {str(e)}")
         return False
@@ -133,24 +126,15 @@ def salvar_mesas(df):
 
 def salvar_pedidos(df):
     try:
-        os.makedirs(os.path.dirname(CAMINHO_PEDIDOS_PKL), exist_ok=True)
-
-        with open(CAMINHO_PEDIDOS_PKL, 'wb') as f:
-            pickle.dump(df, f)
-
+        escrever_tabela("pedidos", df)
         return True
-
     except Exception as e:
         st.error(f"⚠️ Erro ao salvar pedidos: {str(e)}")
         return False
 
 
 def carregar_pedidos():
-    if os.path.exists(CAMINHO_PEDIDOS_PKL):
-        with open(CAMINHO_PEDIDOS_PKL, 'rb') as f:
-            return pickle.load(f)
-
-    return pd.DataFrame()
+    return ler_tabela("pedidos")
 
 
 def calcular_valor_mesa(valor_pedidos, cover_total, desconto_valor, valor_10):
@@ -200,7 +184,6 @@ def atualizar_valor_mesa(mesa_id, mesas_df, pedidos_df):
             valor_com_desconto = valor_pedidos
 
         desconto_valor = valor_pedidos - valor_com_desconto
-
     else:
         valor_pedidos = 0.0
         valor_com_desconto = 0.0
@@ -286,36 +269,49 @@ def obter_estatisticas_mesa(mesa_id, pedidos_df, aberto_em_str):
     }
 
 
+def _limpar_valor(v):
+    if v is None:
+        return None
+
+    try:
+        import numpy as np
+        if isinstance(v, np.generic):
+            return v.item()
+    except ImportError:
+        pass
+
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+
+    return v
+
+
 def adicionar_historico_mesa(mesa_historico):
-    caminho = "data/historico_mesas.pkl"
+    chave_mesa = str(mesa_historico.get('id_mesa', ''))
+    chave_aberto = str(mesa_historico.get('aberto_em', ''))
 
-    if os.path.exists(caminho):
-        with open(caminho, 'rb') as f:
-            historico = pickle.load(f)
-    else:
-        historico = []
+    historico = ler_tabela("historico_mesas")
 
-    chave_nova = (
-        str(mesa_historico.get('id_mesa', '')),
-        str(mesa_historico.get('aberto_em', ''))
-    )
-
-    substituido = False
-    for i, registro in enumerate(historico):
-        chave_existente = (
-            str(registro.get('id_mesa', '')),
-            str(registro.get('aberto_em', ''))
+    if not historico.empty:
+        mask = (
+            (historico['id_mesa'].astype(str) == chave_mesa) &
+            (historico['aberto_em'].astype(str) == chave_aberto)
         )
-        if chave_existente == chave_nova:
-            historico[i] = mesa_historico
-            substituido = True
-            break
+        if mask.any():
+            executar(
+                'DELETE FROM "historico_mesas" WHERE "id_mesa" = :m AND "aberto_em" = :a',
+                {"m": chave_mesa, "a": chave_aberto}
+            )
 
-    if not substituido:
-        historico.append(mesa_historico)
+    limpo = {k: _limpar_valor(v) for k, v in mesa_historico.items()}
 
-    with open(caminho, 'wb') as f:
-        pickle.dump(historico, f)
+    try:
+        inserir_linha("historico_mesas", limpo)
+    except Exception as e:
+        st.error(f"⚠️ Erro ao salvar histórico de mesa: {str(e)}")
 
 
 def obter_id_venda_mesa(mesa_id, aberto_em):

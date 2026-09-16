@@ -1,14 +1,6 @@
-import os
-import pickle
 import hashlib
-
-from utils.paths import get_caminhos
-
-_c = get_caminhos()
-CAMINHO_FUNCIONARIOS = os.path.join(
-    os.path.dirname(_c["caixa"]),
-    "funcionarios.pkl"
-)
+import pandas as pd
+from utils.db import ler_tabela, escrever_tabela
 
 ADMIN_FIXO = {
     'id_funcionario': 'FUN-000',
@@ -27,32 +19,35 @@ ADMIN_FIXO = {
 
 
 def carregar_funcionarios():
-    if os.path.exists(CAMINHO_FUNCIONARIOS):
-        with open(CAMINHO_FUNCIONARIOS, "rb") as f:
-            return pickle.load(f)
-    return []
+    df = ler_tabela("funcionarios")
+
+    if df.empty:
+        return []
+
+    registros = df.to_dict(orient="records")
+
+    for f in registros:
+        f['ativo'] = bool(f.get('ativo', True))
+        f['fixo'] = bool(f.get('fixo', False))
+        f['valor_dia'] = float(f.get('valor_dia', 0.0) or 0.0)
+
+    return registros
 
 
 def salvar_funcionarios(lista):
-    os.makedirs(os.path.dirname(CAMINHO_FUNCIONARIOS), exist_ok=True)
-    with open(CAMINHO_FUNCIONARIOS, "wb") as f:
-        pickle.dump(lista, f)
+    df = pd.DataFrame(lista)
+
+    escrever_tabela("funcionarios", df)
 
 
 def hash_senha(senha):
     return hashlib.sha256(senha.encode("utf-8")).hexdigest()
 
 
-def gerar_id_funcionario(lista):
-    numeros = []
-    for f in lista:
-        id_f = str(f.get('id_funcionario', ''))
-        if id_f.startswith('FUN-'):
-            try:
-                numeros.append(int(id_f.replace('FUN-', '')))
-            except ValueError:
-                pass
-    proximo = max(numeros) + 1 if numeros else 1
+def gerar_id_funcionario(lista=None):
+    from utils.db import proximo_id_numerico
+
+    proximo = proximo_id_numerico("funcionarios", "id_funcionario", "FUN-")
     return f"FUN-{proximo:03d}"
 
 

@@ -1,90 +1,89 @@
-import os
-import pickle
+import json
 import pandas as pd
 import streamlit as st
 
 from datetime import datetime
-from utils.paths import get_caminhos
+from utils.db import ler_tabela, escrever_tabela, executar
 from utils.pedidos_utils import gerar_id_pedido, gerar_cod_item, sincronizar_historico_pedido
 from utils.movimentacoes_utils import baixar_por_produto
 
-_c = get_caminhos()
 
-CAMINHO_CAIXA = _c["caixa"]
-CAMINHO_PRODUTOS = _c["produtos"]
-CAMINHO_HISTORICO = os.path.join(
-    os.path.dirname(CAMINHO_CAIXA),
-    "historico_caixa.pkl"
-)
+_cache_venda = {}
+_cache_estorno = {}
+
+
+def _carregar_jsonb(nome_tabela):
+    df = ler_tabela(nome_tabela)
+
+    if df.empty or "dados" not in df.columns:
+        return None
+
+    valor = df["dados"].iloc[0]
+
+    if valor is None:
+        return None
+
+    if isinstance(valor, dict):
+        return valor
+
+    if isinstance(valor, str):
+        try:
+            return json.loads(valor)
+        except Exception:
+            return None
+
+    return valor
+
+
+def _salvar_jsonb(nome_tabela, dados):
+    payload = json.dumps(dados, ensure_ascii=False, default=str)
+
+    executar(f'TRUNCATE TABLE "{nome_tabela}"')
+    executar(
+        f'INSERT INTO "{nome_tabela}" (dados) VALUES (:d)',
+        {"d": payload}
+    )
 
 
 def carregar_caixa():
-    if os.path.exists(CAMINHO_CAIXA):
-        with open(CAMINHO_CAIXA, "rb") as f:
-            caixa = pickle.load(f)
+    caixa = _carregar_jsonb("caixa")
 
-        caixa.setdefault("saldo_inicial", 0.0)
-        caixa.setdefault("data_abertura", "")
-        caixa.setdefault("data_fechamento", "")
-        caixa.setdefault("status", "fechado")
-        caixa.setdefault("vendas_mesa", 0.0)
-        caixa.setdefault("vendas_balcao", 0.0)
-        caixa.setdefault("vendas_takeaway", 0.0)
-        caixa.setdefault("vendas_delivery", 0.0)
-        caixa.setdefault("reembolso", 0.0)
-        caixa.setdefault("pagamentos", [])
-        caixa.setdefault("entradas", [])
-        caixa.setdefault("saidas", [])
-        caixa.setdefault("vendas_metodo", {})
-        caixa.setdefault("fiados", [])
-        caixa.setdefault("estornos", [])
+    if caixa is None:
+        caixa = {}
 
-        return caixa
+    caixa.setdefault("saldo_inicial", 0.0)
+    caixa.setdefault("data_abertura", "")
+    caixa.setdefault("data_fechamento", "")
+    caixa.setdefault("status", "fechado")
+    caixa.setdefault("vendas_mesa", 0.0)
+    caixa.setdefault("vendas_balcao", 0.0)
+    caixa.setdefault("vendas_takeaway", 0.0)
+    caixa.setdefault("vendas_delivery", 0.0)
+    caixa.setdefault("reembolso", 0.0)
+    caixa.setdefault("pagamentos", [])
+    caixa.setdefault("entradas", [])
+    caixa.setdefault("saidas", [])
+    caixa.setdefault("vendas_metodo", {})
+    caixa.setdefault("fiados", [])
+    caixa.setdefault("estornos", [])
 
-    return {
-        "saldo_inicial": 0.0,
-        "data_abertura": "",
-        "data_fechamento": "",
-        "status": "fechado",
-        "vendas_mesa": 0.0,
-        "vendas_balcao": 0.0,
-        "vendas_takeaway": 0.0,
-        "vendas_delivery": 0.0,
-        "reembolso": 0.0,
-        "pagamentos": [],
-        "entradas": [],
-        "saidas": [],
-        "vendas_metodo": {},
-        "fiados": [],
-        "estornos": []
-    }
+    return caixa
 
 
 def salvar_caixa(caixa):
-    os.makedirs(os.path.dirname(CAMINHO_CAIXA), exist_ok=True)
-
     caixa.setdefault("fiados", [])
     caixa.setdefault("vendas_takeaway", 0.0)
     caixa.setdefault("estornos", [])
 
-    with open(CAMINHO_CAIXA, "wb") as f:
-        pickle.dump(caixa, f)
+    _salvar_jsonb("caixa", caixa)
 
 
 def carregar_produtos():
-    if os.path.exists(CAMINHO_PRODUTOS):
-        with open(CAMINHO_PRODUTOS, "rb") as f:
-            return pickle.load(f)
-
-    return pd.DataFrame()
+    return ler_tabela("produtos")
 
 
 def carregar_historico_caixa():
-    if not os.path.exists(CAMINHO_HISTORICO):
-        return []
-
-    with open(CAMINHO_HISTORICO, "rb") as f:
-        historico = pickle.load(f)
+    historico = _carregar_jsonb("historico_caixa")
 
     if not isinstance(historico, list):
         return []
@@ -104,12 +103,27 @@ def salvar_historico_caixa(caixa):
 
     historico.append(caixa.copy())
 
-    os.makedirs(os.path.dirname(CAMINHO_HISTORICO), exist_ok=True)
-
-    with open(CAMINHO_HISTORICO, "wb") as f:
-        pickle.dump(historico, f)
+    _salvar_jsonb("historico_caixa", historico)
 
     return True
+
+
+def atualizar_historico_caixa(caixa):
+    historico = carregar_historico_caixa()
+
+    if not isinstance(historico, list):
+        historico = []
+
+    data_abertura = caixa.get("data_abertura", "")
+
+    historico = [
+        h for h in historico
+        if h.get("data_abertura") != data_abertura
+    ]
+
+    historico.append(caixa.copy())
+
+    _salvar_jsonb("historico_caixa", historico)
 
 
 def calcular_saldo_caixa(caixa):
@@ -124,7 +138,6 @@ def calcular_saldo_caixa(caixa):
     total_saidas = (
         total_estornos
         + float(caixa.get("reembolso", 0) or 0)
-        + float(caixa.get("estorno", 0) or 0)
         + sum(float(p.get("valor", 0)) for p in caixa.get("pagamentos", []))
         + sum(float(s.get("valor", 0)) for s in caixa.get("saidas", []))
     )
@@ -139,65 +152,84 @@ def calcular_saldo_caixa(caixa):
 
 
 def gerar_id_venda():
-    ano_mes = datetime.now().strftime("%y%m")
+    from datetime import datetime as _dt
+
+    ano_mes = _dt.now().strftime("%y%m")
     prefixo = f"VD{ano_mes}"
 
-    maior = 0
+    if prefixo in _cache_venda:
+        numero = _cache_venda[prefixo]
+    else:
+        maior = 0
 
-    caixa = carregar_caixa()
-    for entrada in caixa.get("entradas", []):
-        id_v = str(entrada.get("id_venda", "") or "")
-        if id_v.startswith(prefixo):
-            try:
-                numero = int(id_v[len(prefixo):])
-                if numero > maior:
-                    maior = numero
-            except ValueError:
-                pass
+        for cx in carregar_historico_caixa():
+            for entrada in cx.get("entradas", []):
+                id_v = str(entrada.get("id_venda", "") or "")
+                if id_v.startswith(prefixo):
+                    try:
+                        n = int(id_v[len(prefixo):])
+                        if n > maior:
+                            maior = n
+                    except ValueError:
+                        pass
 
-    for cx in carregar_historico_caixa():
-        for entrada in cx.get("entradas", []):
+        caixa = carregar_caixa()
+        for entrada in caixa.get("entradas", []):
             id_v = str(entrada.get("id_venda", "") or "")
             if id_v.startswith(prefixo):
                 try:
-                    numero = int(id_v[len(prefixo):])
-                    if numero > maior:
-                        maior = numero
+                    n = int(id_v[len(prefixo):])
+                    if n > maior:
+                        maior = n
                 except ValueError:
                     pass
 
-    return f"{prefixo}{maior + 1:04d}"
+        numero = maior + 1
+
+    _cache_venda[prefixo] = numero + 1
+
+    return f"{prefixo}{numero:04d}"
 
 
 def gerar_id_estorno():
-    ano_mes = datetime.now().strftime("%y%m")
+    from datetime import datetime as _dt
+
+    ano_mes = _dt.now().strftime("%y%m")
     prefixo = f"EST{ano_mes}"
 
-    maior = 0
+    if prefixo in _cache_estorno:
+        numero = _cache_estorno[prefixo]
+    else:
+        maior = 0
 
-    caixa = carregar_caixa()
-    for estorno in caixa.get("estornos", []):
-        id_e = str(estorno.get("id_estorno", "") or "")
-        if id_e.startswith(prefixo):
-            try:
-                numero = int(id_e[len(prefixo):])
-                if numero > maior:
-                    maior = numero
-            except ValueError:
-                pass
+        for cx in carregar_historico_caixa():
+            for estorno in cx.get("estornos", []):
+                id_e = str(estorno.get("id_estorno", "") or "")
+                if id_e.startswith(prefixo):
+                    try:
+                        n = int(id_e[len(prefixo):])
+                        if n > maior:
+                            maior = n
+                    except ValueError:
+                        pass
 
-    for cx in carregar_historico_caixa():
-        for estorno in cx.get("estornos", []):
+        caixa = carregar_caixa()
+        for estorno in caixa.get("estornos", []):
             id_e = str(estorno.get("id_estorno", "") or "")
             if id_e.startswith(prefixo):
                 try:
-                    numero = int(id_e[len(prefixo):])
-                    if numero > maior:
-                        maior = numero
+                    n = int(id_e[len(prefixo):])
+                    if n > maior:
+                        maior = n
                 except ValueError:
                     pass
 
-    return f"{prefixo}{maior + 1:04d}"
+        numero = maior + 1
+
+    _cache_estorno[prefixo] = numero + 1
+
+    return f"{prefixo}{numero:04d}"
+
 
 def listar_vendas_estornaveis(periodo="Hoje"):
     from datetime import datetime, timedelta
@@ -546,25 +578,6 @@ def resetar_caixa():
     salvar_caixa(caixa)
 
     return caixa
-
-
-def atualizar_historico_caixa(caixa):
-    historico = carregar_historico_caixa()
-
-    if not isinstance(historico, list):
-        historico = []
-
-    data_abertura = caixa.get("data_abertura", "")
-
-    historico = [
-        h for h in historico
-        if h.get("data_abertura") != data_abertura
-    ]
-
-    historico.append(caixa.copy())
-
-    with open(CAMINHO_HISTORICO, "wb") as f:
-        pickle.dump(historico, f)
 
 
 def obter_caixa_aberto():

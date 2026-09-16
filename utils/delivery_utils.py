@@ -1,13 +1,10 @@
-import os
-import pickle
 import pandas as pd
+
 from datetime import datetime
 
-from utils.paths import get_caminhos
+from utils.db import ler_tabela, inserir_linha, atualizar_linhas
 from utils.clientes_utils import carregar_clientes
 
-_c = get_caminhos()
-CAMINHO_DELIVERY = os.path.join(os.path.dirname(_c["caixa"]), "delivery.pkl")
 
 COLUNAS_DELIVERY = [
     'id_pedido',
@@ -32,26 +29,30 @@ COLUNAS_DELIVERY = [
 
 
 def carregar_delivery():
-    if os.path.exists(CAMINHO_DELIVERY):
-        with open(CAMINHO_DELIVERY, 'rb') as f:
-            dados = pickle.load(f)
-        if isinstance(dados, list):
-            return pd.DataFrame(dados) if dados else pd.DataFrame(columns=COLUNAS_DELIVERY)
-        return dados
-    return pd.DataFrame(columns=COLUNAS_DELIVERY)
+    df = ler_tabela("delivery")
+
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_DELIVERY)
+
+    for coluna in COLUNAS_DELIVERY:
+        if coluna not in df.columns:
+            df[coluna] = ''
+
+    return df
 
 
 def salvar_delivery(df):
-    os.makedirs(os.path.dirname(CAMINHO_DELIVERY), exist_ok=True)
-    with open(CAMINHO_DELIVERY, 'wb') as f:
-        pickle.dump(df, f)
+    from utils.db import escrever_tabela
+    escrever_tabela("delivery", df)
 
 
 def criar_registro_delivery(id_pedido, id_cliente, nome_cliente, telefone, endereco, referencia, itens_resumo, valor_total, taxa_entrega, latitude='', longitude=''):
     df = carregar_delivery()
-    if id_pedido in df['id_pedido'].astype(str).values:
+
+    if not df.empty and id_pedido in df['id_pedido'].astype(str).values:
         return
-    novo = pd.DataFrame([{
+
+    novo = {
         'id_pedido': id_pedido,
         'id_cliente': id_cliente,
         'nome_cliente': nome_cliente,
@@ -70,32 +71,38 @@ def criar_registro_delivery(id_pedido, id_cliente, nome_cliente, telefone, ender
         'status_entrega': 'preparando',
         'latitude': latitude,
         'longitude': longitude
-    }])
-    df = pd.concat([df, novo], ignore_index=True)
-    salvar_delivery(df)
+    }
+
+    inserir_linha("delivery", novo)
 
 
 def atualizar_status(id_pedido, novo_status, motoboy=''):
     df = carregar_delivery()
+
+    if df.empty:
+        return False
+
     idx = df[df['id_pedido'].astype(str) == str(id_pedido)].index
+
     if idx.empty:
         return False
-    idx = idx[0]
+
     agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-    if novo_status == 'pronto':
-        df.loc[idx, 'pronto_em'] = agora
-    elif novo_status == 'em_rota':
-        df.loc[idx, 'saiu_entrega_em'] = agora
-        if motoboy:
-            df.loc[idx, 'motoboy'] = motoboy
-    elif novo_status == 'chegou':
-        df.loc[idx, 'chegou_cliente_em'] = agora
-    elif novo_status == 'entregue':
-        df.loc[idx, 'entregue_em'] = agora
+    valores = {'status_entrega': novo_status}
 
-    df.loc[idx, 'status_entrega'] = novo_status
-    salvar_delivery(df)
+    if novo_status == 'pronto':
+        valores['pronto_em'] = agora
+    elif novo_status == 'em_rota':
+        valores['saiu_entrega_em'] = agora
+        if motoboy:
+            valores['motoboy'] = motoboy
+    elif novo_status == 'chegou':
+        valores['chegou_cliente_em'] = agora
+    elif novo_status == 'entregue':
+        valores['entregue_em'] = agora
+
+    atualizar_linhas("delivery", "id_pedido", id_pedido, valores)
     return True
 
 

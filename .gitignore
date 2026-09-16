@@ -33,3 +33,16 @@ dist/
 # Arquivos do sistema
 .DS_Store
 Thumbs.db
+
+# Segredos
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Build / instalador
+*.exe
+launcher.bat
+install.md
+teste*.py
+teste*.ipynb
+uv.lock

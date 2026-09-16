@@ -1,22 +1,11 @@
-import os
-import time
-import pickle
+import json
 import pandas as pd
 import streamlit as st
+
 from datetime import datetime
 
-from utils.paths import get_caminhos
+from utils.db import ler_tabela, escrever_tabela, inserir_linha, executar
 
-_c = get_caminhos()
-CAMINHO_PRODUTOS = _c["produtos"]
-CAMINHO_ESTOQUE_PKL = _c["estoque"]
-CAMINHO_COMPRAS_PKL = _c["compras"]
-CAMINHO_INSUMOS_PKL = _c["insumos"]
-CAMINHO_FICHA_PKL = _c["ficha"]
-CAMINHO_ESTOQUE_BAIXAS_PKL = _c["estoque_baixas"]
-CAMINHO_ESTOQUE_INVENTARIO_PKL = _c["estoque_inventario"]
-CAMINHO_BACKUP_ESTOQUE = _c["backup_estoque"]
-CAMINHO_BACKUP_COMPRAS = _c["backup_compras"]
 
 COLUNAS_ESTOQUE = [
     'id_insumo', 'nome_insumo', 'unidade',
@@ -42,35 +31,63 @@ COLUNAS_ESTOQUE_INVENTARIO = [
     'observacao', 'usuario'
 ]
 
-os.makedirs(os.path.dirname(CAMINHO_ESTOQUE_PKL), exist_ok=True)
-os.makedirs(CAMINHO_BACKUP_ESTOQUE, exist_ok=True)
-os.makedirs(CAMINHO_BACKUP_COMPRAS, exist_ok=True)
 
+def _carregar_jsonb(nome_tabela):
+    df = ler_tabela(nome_tabela)
 
-def carregar_df(caminho, colunas=None):
-    if os.path.exists(caminho):
+    if df.empty or "dados" not in df.columns:
+        return []
+
+    valor = df["dados"].iloc[0]
+
+    if valor is None:
+        return []
+
+    if isinstance(valor, list):
+        return valor
+
+    if isinstance(valor, str):
         try:
-            with open(caminho, 'rb') as f:
-                df = pickle.load(f)
-            if colunas:
-                for col in colunas:
-                    if col not in df.columns:
-                        df[col] = ''
-            for col in colunas or []:
-                if col in df.columns and col not in ['quantidade', 'preco_unitario', 'valor_total', 'estoque', 'inventario', 'diferenca', 'a_vencer_7d', 'a_vencer_30d']:
-                    df[col] = df[col].astype(str)
-            return df
-        except Exception as e:
-            st.error(f"Erro ao carregar: {str(e)}")
-            return pd.DataFrame(columns=colunas or [])
-    return pd.DataFrame(columns=colunas or [])
+            return json.loads(valor)
+        except Exception:
+            return []
+
+    return []
 
 
-def salvar_df(df, caminho):
+def _salvar_jsonb(nome_tabela, dados):
+    payload = json.dumps(dados, ensure_ascii=False, default=str)
+
+    executar(f'TRUNCATE TABLE "{nome_tabela}"')
+    executar(
+        f'INSERT INTO "{nome_tabela}" (dados) VALUES (:d)',
+        {"d": payload}
+    )
+
+
+def carregar_df(nome_tabela, colunas=None):
+    df = ler_tabela(nome_tabela)
+
+    if df.empty:
+        if colunas:
+            return pd.DataFrame(columns=colunas)
+        return pd.DataFrame()
+
+    if colunas:
+        for col in colunas:
+            if col not in df.columns:
+                df[col] = ''
+
+        for col in colunas:
+            if col in df.columns and col not in ['quantidade', 'preco_unitario', 'valor_total', 'estoque', 'inventario', 'diferenca', 'a_vencer_7d', 'a_vencer_30d']:
+                df[col] = df[col].astype(str)
+
+    return df
+
+
+def salvar_df(df, nome_tabela):
     try:
-        os.makedirs(os.path.dirname(caminho), exist_ok=True)
-        with open(caminho, 'wb') as f:
-            pickle.dump(df, f)
+        escrever_tabela(nome_tabela, df)
         return True
     except Exception as e:
         st.error(f"Erro ao salvar: {str(e)}")
@@ -78,37 +95,28 @@ def salvar_df(df, caminho):
 
 
 def gerar_id_compra():
-    df = carregar_df(CAMINHO_COMPRAS_PKL, COLUNAS_COMPRAS)
-    if df.empty:
-        return "CMP-001"
-    ids = df['id_compra'].tolist()
-    numeros = [int(id.replace('CMP-', '')) for id in ids if id.startswith('CMP-')]
-    novo_num = max(numeros) + 1 if numeros else 1
-    return f"CMP-{novo_num:03d}"
+    from utils.db import proximo_id_numerico
+
+    proximo = proximo_id_numerico("compras", "id_compra", "CMP-")
+    return f"CMP-{proximo:03d}"
 
 
 def gerar_id_baixa():
-    df = carregar_df(CAMINHO_ESTOQUE_BAIXAS_PKL, COLUNAS_ESTOQUE_BAIXAS)
-    if df.empty:
-        return "BAIXA-001"
-    ids = df['id_baixa'].tolist()
-    numeros = [int(id.replace('BAIXA-', '')) for id in ids if id.startswith('BAIXA-')]
-    novo_num = max(numeros) + 1 if numeros else 1
-    return f"BAIXA-{novo_num:03d}"
+    from utils.db import proximo_id_numerico
+
+    proximo = proximo_id_numerico("estoque_baixas", "id_baixa", "BAIXA-")
+    return f"BAIXA-{proximo:03d}"
 
 
 def gerar_id_inventario():
-    df = carregar_df(CAMINHO_ESTOQUE_INVENTARIO_PKL, COLUNAS_ESTOQUE_INVENTARIO)
-    if df.empty:
-        return "INV-001"
-    ids = df['id_inventario'].tolist()
-    numeros = [int(id.replace('INV-', '')) for id in ids if id.startswith('INV-')]
-    novo_num = max(numeros) + 1 if numeros else 1
-    return f"INV-{novo_num:03d}"
+    from utils.db import proximo_id_numerico
+
+    proximo = proximo_id_numerico("estoque_inventario", "id_inventario", "INV-")
+    return f"INV-{proximo:03d}"
 
 
 def calcular_a_vencer(id_insumo):
-    df_compras = carregar_df(CAMINHO_COMPRAS_PKL, COLUNAS_COMPRAS)
+    df_compras = carregar_df("compras", COLUNAS_COMPRAS)
     if df_compras.empty:
         return 0.0, 0.0
 
@@ -130,7 +138,7 @@ def calcular_a_vencer(id_insumo):
                     a_vencer_7d += float(row['quantidade'])
                 if 0 <= dias_para_vencer <= 30:
                     a_vencer_30d += float(row['quantidade'])
-            except:
+            except Exception:
                 pass
 
     return a_vencer_7d, a_vencer_30d
@@ -155,28 +163,23 @@ def converter_unidade(quantidade, unidade_origem, unidade_destino):
 
 
 def _snapshot_estoque():
-    df_estoque = carregar_df(CAMINHO_ESTOQUE_PKL, COLUNAS_ESTOQUE)
+    df_estoque = carregar_df("estoque", COLUNAS_ESTOQUE)
     if df_estoque.empty:
         return
-    historico_path = os.path.join(os.path.dirname(CAMINHO_ESTOQUE_PKL), "historico_estoque.pkl")
-    historico = []
-    if os.path.exists(historico_path):
-        with open(historico_path, 'rb') as f:
-            historico = pickle.load(f)
+
+    historico = _carregar_jsonb("historico_estoque")
+
     historico.append({
         'data': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         'estoque': df_estoque.to_dict('records')
     })
-    with open(historico_path, 'wb') as f:
-        pickle.dump(historico, f)
+
+    _salvar_jsonb("historico_estoque", historico)
 
 
 def _registrar_historico_baixa(id_pedido, cod_item, cod_prod, insumos):
-    historico_path = os.path.join(os.path.dirname(CAMINHO_ESTOQUE_PKL), "historico_baixas.pkl")
-    historico = []
-    if os.path.exists(historico_path):
-        with open(historico_path, 'rb') as f:
-            historico = pickle.load(f)
+    historico = _carregar_jsonb("historico_baixas")
+
     for insumo in insumos:
         historico.append({
             'id_baixa': gerar_id_baixa(),
@@ -189,16 +192,13 @@ def _registrar_historico_baixa(id_pedido, cod_item, cod_prod, insumos):
             'data_baixa': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             'observacao': 'Baixa automática'
         })
-    with open(historico_path, 'wb') as f:
-        pickle.dump(historico, f)
+
+    _salvar_jsonb("historico_baixas", historico)
 
 
 def _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade, motivo):
-    historico_path = os.path.join(os.path.dirname(CAMINHO_ESTOQUE_PKL), "historico_nao_baixados.pkl")
-    historico = []
-    if os.path.exists(historico_path):
-        with open(historico_path, 'rb') as f:
-            historico = pickle.load(f)
+    historico = _carregar_jsonb("historico_nao_baixados")
+
     historico.append({
         'id_pedido': id_pedido,
         'cod_item': cod_item,
@@ -208,12 +208,12 @@ def _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade,
         'motivo': motivo,
         'data_processamento': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     })
-    with open(historico_path, 'wb') as f:
-        pickle.dump(historico, f)
+
+    _salvar_jsonb("historico_nao_baixados", historico)
 
 
 def baixar_estoque_por_item(id_pedido, cod_item, cod_prod, quantidade_item, nome_prod=''):
-    df_produtos = carregar_df(CAMINHO_PRODUTOS)
+    df_produtos = carregar_df("produtos")
 
     if df_produtos.empty:
         _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade_item, "Nenhum produto cadastrado")
@@ -230,7 +230,7 @@ def baixar_estoque_por_item(id_pedido, cod_item, cod_prod, quantidade_item, nome
     insumo_direto = produto.get('insumo_direto', '')
 
     if marcador_cozinha:
-        df_ficha = carregar_df(CAMINHO_FICHA_PKL)
+        df_ficha = carregar_df("ficha_tecnica")
         if df_ficha.empty:
             _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade_item, "Ficha técnica vazia")
             return False, "Ficha técnica vazia", []
@@ -240,13 +240,13 @@ def baixar_estoque_por_item(id_pedido, cod_item, cod_prod, quantidade_item, nome
             _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade_item, f"Produto {cod_prod} sem ficha técnica")
             return False, f"Produto {cod_prod} não tem ficha técnica", []
 
-        df_insumos = carregar_df(CAMINHO_INSUMOS_PKL)
+        df_insumos = carregar_df("insumos")
         if df_insumos.empty:
             _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade_item, "Nenhum insumo cadastrado")
             return False, "Nenhum insumo cadastrado", []
 
-        df_estoque = carregar_df(CAMINHO_ESTOQUE_PKL, COLUNAS_ESTOQUE)
-        df_baixas = carregar_df(CAMINHO_ESTOQUE_BAIXAS_PKL, COLUNAS_ESTOQUE_BAIXAS)
+        df_estoque = carregar_df("estoque", COLUNAS_ESTOQUE)
+        df_baixas = carregar_df("estoque_baixas", COLUNAS_ESTOQUE_BAIXAS)
 
         insumos_baixados = []
         erros = []
@@ -295,15 +295,16 @@ def baixar_estoque_por_item(id_pedido, cod_item, cod_prod, quantidade_item, nome
                 'observacao': f"Qtd original: {quantidade_total}{unidade_ficha}"
             }])
             df_baixas = pd.concat([df_baixas, nova_baixa], ignore_index=True)
+
             insumos_baixados.append({
                 'id_insumo': id_insumo,
                 'quantidade': quantidade_convertida,
                 'unidade': unidade_compra
             })
 
-        if not salvar_df(df_estoque, CAMINHO_ESTOQUE_PKL):
+        if not salvar_df(df_estoque, "estoque"):
             return False, "Erro ao salvar estoque", insumos_baixados
-        if not salvar_df(df_baixas, CAMINHO_ESTOQUE_BAIXAS_PKL):
+        if not salvar_df(df_baixas, "estoque_baixas"):
             return False, "Erro ao salvar baixas", insumos_baixados
 
         if insumos_baixados:
@@ -317,10 +318,10 @@ def baixar_estoque_por_item(id_pedido, cod_item, cod_prod, quantidade_item, nome
         return True, mensagem, insumos_baixados
 
     elif insumo_direto:
-        df_estoque = carregar_df(CAMINHO_ESTOQUE_PKL, COLUNAS_ESTOQUE)
-        df_baixas = carregar_df(CAMINHO_ESTOQUE_BAIXAS_PKL, COLUNAS_ESTOQUE_BAIXAS)
+        df_estoque = carregar_df("estoque", COLUNAS_ESTOQUE)
+        df_baixas = carregar_df("estoque_baixas", COLUNAS_ESTOQUE_BAIXAS)
 
-        df_insumos = carregar_df(CAMINHO_INSUMOS_PKL)
+        df_insumos = carregar_df("insumos")
         if df_insumos.empty:
             _registrar_nao_baixado(id_pedido, cod_item, cod_prod, nome_prod, quantidade_item, "Nenhum insumo cadastrado")
             return False, "Nenhum insumo cadastrado", []
@@ -354,9 +355,9 @@ def baixar_estoque_por_item(id_pedido, cod_item, cod_prod, quantidade_item, nome
         }])
         df_baixas = pd.concat([df_baixas, nova_baixa], ignore_index=True)
 
-        if not salvar_df(df_estoque, CAMINHO_ESTOQUE_PKL):
+        if not salvar_df(df_estoque, "estoque"):
             return False, "Erro ao salvar estoque", []
-        if not salvar_df(df_baixas, CAMINHO_ESTOQUE_BAIXAS_PKL):
+        if not salvar_df(df_baixas, "estoque_baixas"):
             return False, "Erro ao salvar baixas", []
 
         insumos_baixados = [{
@@ -404,7 +405,7 @@ def calcular_estoque():
                 df_estoque.loc[idx[0], 'estoque'] -= float(row['total_baixas'])
 
     st.session_state.estoque = df_estoque
-    salvar_df(df_estoque, CAMINHO_ESTOQUE_PKL)
+    salvar_df(df_estoque, "estoque")
 
 
 def registrar_inventario(id_insumo, quantidade_real, observacao=""):
@@ -441,8 +442,8 @@ def registrar_inventario(id_insumo, quantidade_real, observacao=""):
 
     st.session_state.estoque = df_estoque
 
-    salvar_df(df_estoque, CAMINHO_ESTOQUE_PKL)
-    salvar_df(st.session_state.estoque_inventario, CAMINHO_ESTOQUE_INVENTARIO_PKL)
+    salvar_df(df_estoque, "estoque")
+    salvar_df(st.session_state.estoque_inventario, "estoque_inventario")
 
     _snapshot_estoque()
 
@@ -457,13 +458,7 @@ def registrar_inventario(id_insumo, quantidade_real, observacao=""):
 
 
 def restaurar_estoque_do_historico():
-    historico_path = os.path.join(os.path.dirname(CAMINHO_ESTOQUE_PKL), "historico_estoque.pkl")
-
-    if not os.path.exists(historico_path):
-        return False, "Nenhum histórico de estoque encontrado"
-
-    with open(historico_path, 'rb') as f:
-        historico_estoque = pickle.load(f)
+    historico_estoque = _carregar_jsonb("historico_estoque")
 
     if not historico_estoque:
         return False, "Histórico de estoque vazio"
@@ -484,12 +479,20 @@ def restaurar_estoque_do_historico():
         if col not in df_restaurado.columns:
             df_restaurado[col] = 0.0 if col in ['estoque', 'inventario', 'diferenca', 'a_vencer_7d', 'a_vencer_30d'] else ''
 
-    salvar_df(df_restaurado, CAMINHO_ESTOQUE_PKL)
+    salvar_df(df_restaurado, "estoque")
     return True, f"Estoque restaurado do snapshot de {ultimo.get('data', 'N/A')} com {len(df_restaurado)} insumos"
 
 
-def carregar_pkl(caminho):
-    if os.path.exists(caminho):
-        with open(caminho, 'rb') as f:
-            return pickle.load(f)
+def carregar_pkl(caminho=None):
+    if not caminho:
+        return None
+
+    base = str(caminho).replace("\\", "/").split("/")[-1].replace(".pkl", "")
+
+    if base in ["estoque", "compras", "estoque_baixas", "estoque_inventario", "produtos", "insumos", "ficha_tecnica"]:
+        try:
+            return ler_tabela(base)
+        except Exception:
+            return None
+
     return None

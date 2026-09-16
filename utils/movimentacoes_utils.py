@@ -1,12 +1,9 @@
-import os
-import pickle
 import pandas as pd
+
 from datetime import datetime
 
-from utils.paths import get_caminhos
+from utils.db import ler_tabela, inserir_linha
 
-_c = get_caminhos()
-CAMINHO_MOVIMENTACOES = _c["movimentacoes"]
 
 COLUNAS_MOVIMENTACOES = [
     'id_movimentacao',
@@ -38,13 +35,6 @@ MOTIVOS_AJUSTE = [
 ]
 
 
-def carregar_pkl(caminho):
-    if os.path.exists(caminho):
-        with open(caminho, 'rb') as f:
-            return pickle.load(f)
-    return None
-
-
 def converter_unidade(quantidade, unidade_origem, unidade_destino):
     if unidade_origem == unidade_destino:
         return quantidade
@@ -64,43 +54,32 @@ def converter_unidade(quantidade, unidade_origem, unidade_destino):
 
 
 def carregar_movimentacoes():
-    if os.path.exists(CAMINHO_MOVIMENTACOES):
-        with open(CAMINHO_MOVIMENTACOES, 'rb') as f:
-            dados = pickle.load(f)
-        if isinstance(dados, list):
-            return pd.DataFrame(dados) if dados else pd.DataFrame(columns=COLUNAS_MOVIMENTACOES)
-        return dados
-    return pd.DataFrame(columns=COLUNAS_MOVIMENTACOES)
+    df = ler_tabela("movimentacoes")
+
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_MOVIMENTACOES)
+
+    for coluna in COLUNAS_MOVIMENTACOES:
+        if coluna not in df.columns:
+            df[coluna] = ''
+
+    return df
 
 
 def salvar_movimentacoes(df):
-    os.makedirs(os.path.dirname(CAMINHO_MOVIMENTACOES), exist_ok=True)
-    with open(CAMINHO_MOVIMENTACOES, 'wb') as f:
-        pickle.dump(df, f)
+    from utils.db import escrever_tabela
+    escrever_tabela("movimentacoes", df)
 
 
 def gerar_id_movimentacao():
-    df = carregar_movimentacoes()
-    if df.empty:
-        return "MOV-00001"
+    from utils.db import proximo_id_numerico
 
-    numeros = []
-    for id_m in df['id_movimentacao'].astype(str):
-        if id_m.startswith('MOV-'):
-            try:
-                numeros.append(int(id_m.replace('MOV-', '')))
-            except ValueError:
-                pass
-
-    proximo = max(numeros) + 1 if numeros else 1
+    proximo = proximo_id_numerico("movimentacoes", "id_movimentacao", "MOV-")
     return f"MOV-{proximo:05d}"
 
 
 def _inserir(registro):
-    df = carregar_movimentacoes()
-    nova = pd.DataFrame([registro])
-    df = pd.concat([df, nova], ignore_index=True)
-    salvar_movimentacoes(df)
+    inserir_linha("movimentacoes", registro)
     return registro
 
 
@@ -224,11 +203,11 @@ def custo_medio_por_insumo():
 
 
 def baixar_por_produto(id_pedido, cod_item, cod_prod, quantidade, nome_prod='', usuario='', data_movimentacao=None):
-    produtos = carregar_pkl(_c["produtos"])
-    fichas = carregar_pkl(_c["ficha"])
-    insumos = carregar_pkl(_c["insumos"])
+    produtos = ler_tabela("produtos")
+    fichas = ler_tabela("ficha_tecnica")
+    insumos = ler_tabela("insumos")
 
-    if produtos is None or produtos.empty:
+    if produtos.empty:
         return False, "Produtos não carregados", []
 
     produto_df = produtos[produtos['cod_prod'].astype(str) == str(cod_prod)]
@@ -240,12 +219,12 @@ def baixar_por_produto(id_pedido, cod_item, cod_prod, quantidade, nome_prod='', 
     insumo_direto = str(produto.get('insumo_direto', '') or '').strip()
 
     ficha = None
-    if fichas is not None and not fichas.empty and 'cod_prod' in fichas.columns:
+    if not fichas.empty and 'cod_prod' in fichas.columns:
         ficha_df = fichas[fichas['cod_prod'].astype(str) == str(cod_prod)]
         if not ficha_df.empty:
             ficha = ficha_df
 
-    if insumos is None or insumos.empty:
+    if insumos.empty:
         return False, "Insumos não carregados", []
 
     insumos_index = insumos.set_index('id_insumo')

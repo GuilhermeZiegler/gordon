@@ -1,13 +1,11 @@
-import os
-import pickle
 import pandas as pd
+
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
-from utils.paths import get_caminhos
+from utils.db import ler_tabela, escrever_tabela
+from utils.db import proximo_id_numerico
 
-_c = get_caminhos()
-CAMINHO_AGENDAMENTOS = os.path.join(os.path.dirname(_c["caixa"]), "agendamentos.pkl")
 
 COLUNAS_AGENDAMENTOS = [
     'id_agendamento',
@@ -34,35 +32,30 @@ PERIODICIDADES = ['mensal', 'semanal', 'quinzenal', 'anual']
 
 
 def carregar_agendamentos():
-    if os.path.exists(CAMINHO_AGENDAMENTOS):
-        with open(CAMINHO_AGENDAMENTOS, 'rb') as f:
-            dados = pickle.load(f)
-        if isinstance(dados, list):
-            return pd.DataFrame(dados) if dados else pd.DataFrame(columns=COLUNAS_AGENDAMENTOS)
-        return dados
-    return pd.DataFrame(columns=COLUNAS_AGENDAMENTOS)
+    df = ler_tabela("agendamentos")
+
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_AGENDAMENTOS)
+
+    if 'recorrente' in df.columns:
+        df['recorrente'] = df['recorrente'].fillna(False)
+
+    if 'valor' in df.columns:
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0.0)
+
+    for coluna in COLUNAS_AGENDAMENTOS:
+        if coluna not in df.columns:
+            df[coluna] = ''
+
+    return df
 
 
 def salvar_agendamentos(df):
-    os.makedirs(os.path.dirname(CAMINHO_AGENDAMENTOS), exist_ok=True)
-    with open(CAMINHO_AGENDAMENTOS, 'wb') as f:
-        pickle.dump(df, f)
+    escrever_tabela("agendamentos", df)
 
 
 def gerar_id_agendamento():
-    df = carregar_agendamentos()
-    if df.empty:
-        return "AGD-00001"
-
-    numeros = []
-    for id_a in df['id_agendamento'].astype(str):
-        if id_a.startswith('AGD-'):
-            try:
-                numeros.append(int(id_a.replace('AGD-', '')))
-            except ValueError:
-                pass
-
-    proximo = max(numeros) + 1 if numeros else 1
+    proximo = proximo_id_numerico("agendamentos", "id_agendamento", "AGD-")
     return f"AGD-{proximo:05d}"
 
 

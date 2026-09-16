@@ -9,6 +9,7 @@ from install.seed.fichas import FICHAS
 from install.seed.funcionarios import FUNCIONARIOS
 from install.seed.clientes import CLIENTES
 
+from utils.staff_utils import ADMIN_FIXO
 
 def _get_custo_insumo(id_insumo, quantidade, unidade_ficha, df_insumos):
     insumo = df_insumos[df_insumos['id_insumo'] == id_insumo]
@@ -44,8 +45,24 @@ def popular_dados():
     with open(_c["ficha"], 'wb') as f:
         pickle.dump(pd.DataFrame(fichas), f)
 
-    from components.auth import ADMIN_FIXO
-    funcionarios_completos = [ADMIN_FIXO.copy()] + [f.copy() for f in FUNCIONARIOS]
+    funcionarios_completos = [ADMIN_FIXO.copy()]
+
+    for i, f in enumerate(FUNCIONARIOS, start=1):
+        func = {
+            'id_funcionario': f"FUN-{i:03d}",
+            'nome': f.get('nome', ''),
+            'cargo': f.get('cargo', ''),
+            'telefone': f.get('telefone', ''),
+            'email': f.get('email', ''),
+            'endereco': f.get('endereco', ''),
+            'valor_dia': float(f.get('valor_dia', 0.0)),
+            'ativo': bool(f.get('ativo', True)),
+            'login': f.get('login', ''),
+            'senha_hash': f.get('senha_hash', ''),
+            'nivel_acesso': f.get('nivel_acesso', 'operador'),
+            'fixo': False
+        }
+        funcionarios_completos.append(func)
 
     with open(os.path.join(DATA_DIR, "funcionarios.pkl"), 'wb') as f:
         pickle.dump(funcionarios_completos, f)

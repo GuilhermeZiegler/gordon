@@ -1,12 +1,21 @@
-import win32print
-from datetime import datetime
 import os
 import textwrap
+from datetime import datetime
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
+try:
+    import win32print
+    _WIN32 = True
+except ImportError:
+    win32print = None
+    _WIN32 = False
+
 
 def listar_impressoras():
+    if not _WIN32:
+        return []
+
     try:
         impressoras = win32print.EnumPrinters(
             win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
@@ -18,6 +27,9 @@ def listar_impressoras():
 
 
 def imprimir_ticket(texto, nome_impressora=None):
+    if not _WIN32:
+        return gerar_pdf(texto)
+
     try:
         if nome_impressora is None:
             nome_impressora = win32print.GetDefaultPrinter()

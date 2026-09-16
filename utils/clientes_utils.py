@@ -1,38 +1,36 @@
-import os
-import pickle
 import time
 import requests
+import pandas as pd
+
 from datetime import datetime
 
-from utils.paths import get_caminhos
-
-_c = get_caminhos()
-CAMINHO_CLIENTES = os.path.join(os.path.dirname(_c["caixa"]), "clientes.pkl")
+from utils.db import ler_tabela, escrever_tabela
 
 
 def carregar_clientes():
-    if os.path.exists(CAMINHO_CLIENTES):
-        with open(CAMINHO_CLIENTES, 'rb') as f:
-            return pickle.load(f)
-    return []
+    df = ler_tabela("clientes")
+
+    if df.empty:
+        return []
+
+    registros = df.to_dict(orient="records")
+
+    for c in registros:
+        c['ativo'] = bool(c.get('ativo', True))
+
+    return registros
 
 
 def salvar_clientes(clientes):
-    os.makedirs(os.path.dirname(CAMINHO_CLIENTES), exist_ok=True)
-    with open(CAMINHO_CLIENTES, 'wb') as f:
-        pickle.dump(clientes, f)
+    df = pd.DataFrame(clientes)
+
+    escrever_tabela("clientes", df)
 
 
-def gerar_id_cliente(clientes):
-    numeros = []
-    for c in clientes:
-        id_c = str(c.get('id_cliente', ''))
-        if id_c.startswith('CLI-'):
-            try:
-                numeros.append(int(id_c.replace('CLI-', '')))
-            except ValueError:
-                pass
-    proximo = max(numeros) + 1 if numeros else 1
+def gerar_id_cliente(clientes=None):
+    from utils.db import obter_proximo_id
+
+    proximo = obter_proximo_id("clientes", "id_cliente", "CLI-")
     return f"CLI-{proximo:03d}"
 
 
@@ -95,6 +93,7 @@ def _montar_endereco(cliente):
     ]
     return ', '.join([p for p in partes if str(p).strip()])
 
+
 def geocodificar_endereco(cliente, email_contato):
     if not email_contato:
         return None
@@ -136,6 +135,7 @@ def geocodificar_endereco(cliente, email_contato):
 
     return None
 
+
 def geocodificar_cliente(id_cliente, email_contato):
     clientes = carregar_clientes()
     for i, c in enumerate(clientes):
@@ -152,7 +152,6 @@ def geocodificar_cliente(id_cliente, email_contato):
 
 def geocodificar_pendentes(email_contato, progresso_callback=None):
     clientes = carregar_clientes()
-    total = len(clientes)
     pendentes = [
         i for i, c in enumerate(clientes)
         if not str(c.get('latitude', '')).strip() and _montar_endereco(c).strip()

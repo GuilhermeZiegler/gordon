@@ -154,6 +154,7 @@ with aba1:
     id_cliente = ""
     nome_cliente_pedido = ""
     metodo_pagamento = ""
+    sem_mesas_abertas = False
 
     if origem_venda == "delivery":
         st.subheader("🚚 Delivery")
@@ -220,26 +221,26 @@ with aba1:
 
         if mesas_abertas.empty:
             st.warning("⚠️ Nenhuma mesa aberta. Abra uma mesa primeiro.")
-            st.stop()
+            sem_mesas_abertas = True
+        else:
+            lista_mesas = mesas_abertas['id_mesa'].tolist()
 
-        lista_mesas = mesas_abertas['id_mesa'].tolist()
+            mesa_selecionada = st.selectbox(
+                "Selecione a mesa:",
+                lista_mesas,
+                key="mesa_selecionada_pedido"
+            )
 
-        mesa_selecionada = st.selectbox(
-            "Selecione a mesa:",
-            lista_mesas,
-            key="mesa_selecionada_pedido"
-        )
+            mesa_info = mesas_abertas[
+                mesas_abertas['id_mesa'] == mesa_selecionada
+            ].iloc[0]
 
-        mesa_info = mesas_abertas[
-            mesas_abertas['id_mesa'] == mesa_selecionada
-        ].iloc[0]
+            st.info(
+                f"👥 Clientes: {mesa_info['qtd_clientes']} | "
+                f"Garçom: {mesa_info['garcom'] if mesa_info['garcom'] else 'Não definido'}"
+            )
 
-        st.info(
-            f"👥 Clientes: {mesa_info['qtd_clientes']} | "
-            f"Garçom: {mesa_info['garcom'] if mesa_info['garcom'] else 'Não definido'}"
-        )
-
-        id_cliente, nome_cliente_pedido, _ = renderizar_seletor_cliente("pedido_atual")
+            id_cliente, nome_cliente_pedido, _ = renderizar_seletor_cliente("pedido_atual")
 
     st.subheader("Produtos")
 
@@ -497,10 +498,23 @@ with aba1:
                     st.error("⚠️ Selecione ou crie um cliente para o delivery.")
                     st.stop()
 
+                if origem_venda == "mesa" and not mesa_selecionada:
+                    st.error("⚠️ Selecione uma mesa aberta antes de enviar.")
+                    st.stop()
+
                 if st.session_state.pedido_atual:
+                    _t = time.time()
+                    st.write("⏱ iniciando envio...")
+
                     id_pedido = gerar_id_pedido(
                         st.session_state.pedidos
                     )
+                    st.write(f"⏱ gerar_id_pedido: {time.time() - _t:.2f}s")
+
+                    from utils.db import inserir_varias_linhas
+
+                    linhas_pedidos = []
+                    linhas_historico = []
 
                     for numero_item, item in enumerate(
                         st.session_state.pedido_atual,
@@ -568,7 +582,9 @@ with aba1:
                             ignore_index=True
                         )
 
-                        pedido_historico = {
+                        linhas_pedidos.append(novo_pedido.iloc[0].to_dict())
+
+                        linhas_historico.append({
                             'id_pedido': id_pedido,
                             'id_item': numero_item,
                             'cod_item': cod_item,
@@ -615,13 +631,17 @@ with aba1:
                             'taxa_embalagem': taxa_embalagem,
                             'id_cliente': id_cliente,
                             'metodo_pagamento': metodo_pagamento
-                        }
+                        })
 
-                        sincronizar_historico_pedido(
-                            pedido_historico,
-                            CAMINHO_HISTORICO_PEDIDOS,
-                            COLUNAS_PEDIDOS
-                        )
+                    st.write(f"⏱ loop montou listas: {time.time() - _t:.2f}s")
+
+                    _t_ins = time.time()
+                    if linhas_pedidos:
+                        inserir_varias_linhas("pedidos", linhas_pedidos)
+
+                    if linhas_historico:
+                        inserir_varias_linhas("historico_pedidos", linhas_historico)
+                    st.write(f"⏱ inserts: {time.time() - _t_ins:.2f}s")
 
                     if origem_venda == "mesa":
                         idx_mesa = st.session_state.mesas[
@@ -650,10 +670,8 @@ with aba1:
                                 2
                             )
 
-                        salvar_pkl(
-                            st.session_state.mesas,
-                            CAMINHO_MESAS
-                        )
+                        from utils.mesas_utils import salvar_mesas as _salvar_mesas
+                        _salvar_mesas(st.session_state.mesas)
 
                     if origem_venda == "delivery":
                         cliente_info = obter_dados_cliente(id_cliente)
@@ -724,11 +742,6 @@ with aba1:
                             lat_delivery,
                             lon_delivery
                         )
-
-                    salvar_pkl(
-                        st.session_state.pedidos,
-                        CAMINHO_PEDIDOS
-                    )
 
                     itens_cozinha = [
                         item
@@ -831,8 +844,8 @@ with aba1:
                         f"✅ Pedido enviado! Total: R$ {total_pedido:.2f}"
                     )
 
-                    time.sleep(1)
-                    st.rerun()
+                    st.write(f"⏱ TOTAL envio: {time.time() - _t:.2f}s")
+                    st.stop()
 
         if st.session_state.pedido_atual:
             st.divider()
@@ -1130,6 +1143,11 @@ with aba2:
                                 'fechado_em'
                             ] = data_fechamento
 
+                            from utils.db import executar
+                            from utils.db import inserir_varias_linhas
+
+                            linhas_hist = []
+
                             for _, item in st.session_state.pedidos.loc[
                                 mask
                             ].iterrows():
@@ -1137,10 +1155,16 @@ with aba2:
                                 pedido_historico['data_fechamento'] = data_fechamento
                                 pedido_historico['status'] = 'fechado'
 
-                                sincronizar_historico_pedido(
-                                    pedido_historico,
-                                    CAMINHO_HISTORICO_PEDIDOS,
-                                    COLUNAS_PEDIDOS
+                                linhas_hist.append(pedido_historico)
+
+                                executar(
+                                    'UPDATE "pedidos" SET "status" = :s '
+                                    'WHERE "id_pedido" = :p AND "id_item" = :i',
+                                    {
+                                        "s": "fechado",
+                                        "p": str(item['id_pedido']),
+                                        "i": int(item['id_item'])
+                                    }
                                 )
 
                                 baixar_por_produto(
@@ -1151,10 +1175,14 @@ with aba2:
                                     item.get('nome_prod', '')
                                 )
 
-                            salvar_pkl(
-                                st.session_state.pedidos,
-                                CAMINHO_PEDIDOS
-                            )
+                            for item_h in linhas_hist:
+                                executar(
+                                    'DELETE FROM "historico_pedidos" WHERE "id_pedido" = :p AND "id_item" = :i',
+                                    {"p": str(item_h['id_pedido']), "i": int(item_h['id_item'])}
+                                )
+
+                            if linhas_hist:
+                                inserir_varias_linhas("historico_pedidos", linhas_hist)
 
                             itens_pedido_atual = st.session_state.pedidos[
                                 st.session_state.pedidos['id_pedido'] ==
@@ -1295,6 +1323,11 @@ with aba2:
                                     'fechado_em'
                                 ] = data_fechamento
 
+                                from utils.db import executar
+                                from utils.db import inserir_varias_linhas
+
+                                linhas_hist = []
+
                                 for _, item in st.session_state.pedidos.loc[
                                     mask
                                 ].iterrows():
@@ -1302,16 +1335,26 @@ with aba2:
                                     pedido_historico['data_fechamento'] = data_fechamento
                                     pedido_historico['status'] = 'cancelado'
 
-                                    sincronizar_historico_pedido(
-                                        pedido_historico,
-                                        CAMINHO_HISTORICO_PEDIDOS,
-                                        COLUNAS_PEDIDOS
+                                    linhas_hist.append(pedido_historico)
+
+                                    executar(
+                                        'UPDATE "pedidos" SET "status" = :s '
+                                        'WHERE "id_pedido" = :p AND "id_item" = :i',
+                                        {
+                                            "s": "cancelado",
+                                            "p": str(item['id_pedido']),
+                                            "i": int(item['id_item'])
+                                        }
                                     )
 
-                                salvar_pkl(
-                                    st.session_state.pedidos,
-                                    CAMINHO_PEDIDOS
-                                )
+                                for item_h in linhas_hist:
+                                    executar(
+                                        'DELETE FROM "historico_pedidos" WHERE "id_pedido" = :p AND "id_item" = :i',
+                                        {"p": str(item_h['id_pedido']), "i": int(item_h['id_item'])}
+                                    )
+
+                                if linhas_hist:
+                                    inserir_varias_linhas("historico_pedidos", linhas_hist)
 
                                 itens_pedido_atual = st.session_state.pedidos[
                                     st.session_state.pedidos['id_pedido'] ==
