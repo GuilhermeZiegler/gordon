@@ -159,7 +159,7 @@ def geocodificar_pendentes(email_contato, progresso_callback=None, salvar_cada=5
 
     pendentes = [
         i for i, c in enumerate(clientes)
-        if not str(c.get('latitude', '')).strip() and _montar_endereco(c).strip()
+        if not _tem_coord_valida(c) and _montar_endereco(c).strip()
     ]
 
     if not pendentes:
