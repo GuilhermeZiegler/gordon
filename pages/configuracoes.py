@@ -57,8 +57,7 @@ def salvar_config(config):
     payload = json.dumps(config, ensure_ascii=False)
 
     executar('TRUNCATE TABLE "config"')
-    executar('INSERT INTO "config" (dados) VALUES (:d)', {"d": payload})
-
+    executar('INSERT INTO "config" (dados) VALUES (CAST(:d AS jsonb))', {"d": payload})
 
 if 'config' not in st.session_state:
     st.session_state.config = carregar_config()

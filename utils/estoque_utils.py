@@ -60,7 +60,7 @@ def _salvar_jsonb(nome_tabela, dados):
 
     executar(f'TRUNCATE TABLE "{nome_tabela}"')
     executar(
-        f'INSERT INTO "{nome_tabela}" (dados) VALUES (:d)',
+        f'INSERT INTO "{nome_tabela}" (dados) VALUES (CAST(:d AS jsonb))',
         {"d": payload}
     )
 

@@ -24,6 +24,10 @@ def carregar_clientes():
 def salvar_clientes(clientes):
     df = pd.DataFrame(clientes)
 
+    for col in ['latitude', 'longitude']:
+        if col in df.columns:
+            df[col] = df[col].replace('', None)
+
     escrever_tabela("clientes", df)
 
 
@@ -150,8 +154,9 @@ def geocodificar_cliente(id_cliente, email_contato):
     return False
 
 
-def geocodificar_pendentes(email_contato, progresso_callback=None):
+def geocodificar_pendentes(email_contato, progresso_callback=None, salvar_cada=5):
     clientes = carregar_clientes()
+
     pendentes = [
         i for i, c in enumerate(clientes)
         if not str(c.get('latitude', '')).strip() and _montar_endereco(c).strip()
@@ -161,19 +166,34 @@ def geocodificar_pendentes(email_contato, progresso_callback=None):
         return 0
 
     processados = 0
+    nao_salvos = 0
 
     for idx, i in enumerate(pendentes):
         c = _garantir_campos(clientes[i])
         coord = geocodificar_endereco(c, email_contato)
+
         if coord:
             clientes[i]['latitude'] = coord[0]
             clientes[i]['longitude'] = coord[1]
             processados += 1
+            nao_salvos += 1
 
         if progresso_callback:
             progresso_callback(idx + 1, len(pendentes), c.get('nome_cliente', ''))
 
+        if nao_salvos >= salvar_cada:
+            try:
+                salvar_clientes(clientes)
+                nao_salvos = 0
+            except Exception:
+                pass
+
         time.sleep(1.1)
 
-    salvar_clientes(clientes)
+    if nao_salvos > 0:
+        try:
+            salvar_clientes(clientes)
+        except Exception:
+            pass
+
     return processados
