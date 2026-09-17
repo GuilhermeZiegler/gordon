@@ -17,6 +17,9 @@ def gerar_id_pedido(pedidos_df=None, historico_path=None):
     return f"PED-{proximo:04d}"
 
 
+_TABELAS_CACHE = {"produtos", "insumos", "ficha_tecnica", "funcionarios"}
+
+
 def carregar_pkl(caminho=None, colunas=None):
     if caminho is None:
         return pd.DataFrame(columns=colunas or [])
@@ -24,7 +27,11 @@ def carregar_pkl(caminho=None, colunas=None):
     nome_tabela = os.path.basename(str(caminho)).replace(".pkl", "")
 
     try:
-        df = ler_tabela(nome_tabela)
+        if nome_tabela in _TABELAS_CACHE:
+            from utils.db import ler_tabela_cache
+            df = ler_tabela_cache(nome_tabela)
+        else:
+            df = ler_tabela(nome_tabela)
     except Exception:
         df = pd.DataFrame(columns=colunas or [])
 

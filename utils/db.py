@@ -225,6 +225,25 @@ def escrever_tabela_df(df, nome, renomear=None):
     escrever_tabela(nome, df_save)
 
 
+_cache_tabelas = {}
+
+
+def ler_tabela_cache(nome):
+    if nome not in _cache_tabelas:
+        _cache_tabelas[nome] = ler_tabela(nome)
+
+    df = _cache_tabelas[nome]
+
+    return df.copy()
+
+
+def invalidar_cache(nome=None):
+    if nome is None:
+        _cache_tabelas.clear()
+    else:
+        _cache_tabelas.pop(nome, None)
+
+
 def testar_conexao():
     with _engine.connect() as conn:
         return conn.execute(text("SELECT 1")).scalar() == 1

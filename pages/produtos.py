@@ -9,12 +9,12 @@ from components.card_ficha_tecnica import renderizar_card_ficha
 from components.auth import exigir_permissao
 exigir_permissao("produtos")
 
-from utils.db import ler_tabela_df, escrever_tabela_df
+from utils.db import ler_tabela_df, escrever_tabela_df, invalidar_cache
 from utils.produtos_utils import calcular_custo_insumo
 
 
 COLUNAS = [
-    'cod_prod', 'nome', 'desc', 'tipo', 'categoria',
+    'cod_prod', 'nome', 'descricao', 'tipo', 'categoria',
     'p_venda', 'p_custo', 'margem', 'tipo_venda',
     'insumo_direto', 'marcador_cozinha'
 ]
@@ -24,14 +24,9 @@ COLUNAS_FICHA = ['cod_prod', 'id_insumo', 'quantidade', 'unidade_ficha']
 UNIDADES = ['g', 'kg', 'ml', 'L', 'un', 'cx', 'pct']
 
 
-if 'produtos' not in st.session_state:
-    st.session_state.produtos = ler_tabela_df(
-        "produtos",
-        COLUNAS,
-        renomear={'descricao': 'desc'}
-    )
-    if st.session_state.produtos.empty:
-        st.session_state.produtos = pd.DataFrame(columns=COLUNAS)
+st.session_state.produtos = ler_tabela_df("produtos", COLUNAS)
+if st.session_state.produtos.empty:
+    st.session_state.produtos = pd.DataFrame(columns=COLUNAS)
 
 if 'insumos' not in st.session_state:
     st.session_state.insumos = ler_tabela_df("insumos", COLUNAS_INSUMOS)
@@ -47,7 +42,7 @@ if 'form_data' not in st.session_state:
     st.session_state.form_data = {
         'cod_prod': '',
         'nome': '',
-        'desc': '',
+        'descricao': '',
         'tipo': '',
         'categoria': '',
         'p_venda': 0.0,
@@ -103,7 +98,7 @@ with aba1:
                         st.session_state.form_data = {
                             'cod_prod': str(row['cod_prod']),
                             'nome': str(row['nome']),
-                            'desc': str(row['desc']) if pd.notna(row.get('desc')) else '',
+                            'descricao': str(row['descricao']) if pd.notna(row.get('descricao')) else '',
                             'tipo': str(row['tipo']) if pd.notna(row.get('tipo')) else '',
                             'categoria': str(row['categoria']) if pd.notna(row.get('categoria')) else '',
                             'p_venda': float(row['p_venda']) if pd.notna(row.get('p_venda')) else 0.0,
@@ -123,7 +118,7 @@ with aba1:
         if st.button("➕ Novo Produto", use_container_width=True):
             st.session_state.editando = False
             for key in st.session_state.form_data:
-                if key in ['cod_prod', 'nome', 'desc', 'tipo', 'categoria']:
+                if key in ['cod_prod', 'nome', 'descricao', 'tipo', 'categoria']:
                     st.session_state.form_data[key] = ''
                 elif key == 'p_venda':
                     st.session_state.form_data[key] = 0.0
@@ -145,7 +140,7 @@ with aba1:
                 cod_prod = st.text_input("Código do Produto", value=cod_auto)
 
             nome = st.text_input("Nome", value=st.session_state.form_data['nome'])
-            desc = st.text_area("Descrição", value=st.session_state.form_data['desc'])
+            descricao = st.text_area("Descrição", value=st.session_state.form_data['descricao'])
         with col2:
             tipo = st.text_input("Tipo", value=st.session_state.form_data['tipo'])
             categoria = st.text_input("Categoria", value=st.session_state.form_data['categoria'])
@@ -186,7 +181,7 @@ with aba1:
                 erros.append("Código")
             if not nome:
                 erros.append("Nome")
-            if not desc:
+            if not descricao:
                 erros.append("Descrição")
             if not tipo:
                 erros.append("Tipo")
@@ -208,7 +203,7 @@ with aba1:
                 if cod_prod_str in df['cod_prod'].astype(str).values:
                     idx = df[df['cod_prod'].astype(str) == cod_prod_str].index[0]
                     df.loc[idx, 'nome'] = str(nome)
-                    df.loc[idx, 'desc'] = str(desc)
+                    df.loc[idx, 'descricao'] = str(descricao)
                     df.loc[idx, 'tipo'] = str(tipo)
                     df.loc[idx, 'categoria'] = str(categoria)
                     df.loc[idx, 'p_venda'] = p_venda
@@ -222,7 +217,7 @@ with aba1:
                     novo = pd.DataFrame([{
                         'cod_prod': cod_prod_str,
                         'nome': str(nome),
-                        'desc': str(desc),
+                        'descricao': str(descricao),
                         'tipo': str(tipo),
                         'categoria': str(categoria),
                         'p_venda': p_venda,
@@ -235,14 +230,11 @@ with aba1:
                     st.session_state.editando = False
 
                 try:
-                    escrever_tabela_df(
-                        st.session_state.produtos,
-                        "produtos",
-                        renomear={'desc': 'descricao'}
-                    )
+                    escrever_tabela_df(st.session_state.produtos, "produtos")
+                    invalidar_cache("produtos")
 
                     for key in st.session_state.form_data:
-                        if key in ['cod_prod', 'nome', 'desc', 'tipo', 'categoria']:
+                        if key in ['cod_prod', 'nome', 'descricao', 'tipo', 'categoria']:
                             st.session_state.form_data[key] = ''
                         elif key == 'p_venda':
                             st.session_state.form_data[key] = 0.0
@@ -269,14 +261,12 @@ with aba1:
                 st.session_state.produtos = df
 
                 try:
-                    escrever_tabela_df(
-                        st.session_state.produtos,
-                        "produtos",
-                        renomear={'desc': 'descricao'}
-                    )
+                    escrever_tabela_df(st.session_state.produtos, "produtos")
+                    invalidar_cache("produtos")
+
 
                     for key in st.session_state.form_data:
-                        if key in ['cod_prod', 'nome', 'desc', 'tipo', 'categoria']:
+                        if key in ['cod_prod', 'nome', 'descricao', 'tipo', 'categoria']:
                             st.session_state.form_data[key] = ''
                         elif key == 'p_venda':
                             st.session_state.form_data[key] = 0.0
@@ -298,7 +288,7 @@ with aba1:
 
         if limpar:
             for key in st.session_state.form_data:
-                if key in ['cod_prod', 'nome', 'desc', 'tipo', 'categoria']:
+                if key in ['cod_prod', 'nome', 'descricao', 'tipo', 'categoria']:
                     st.session_state.form_data[key] = ''
                 elif key == 'p_venda':
                     st.session_state.form_data[key] = 0.0
@@ -374,7 +364,7 @@ with aba3:
             cod_prod_selecionado,
             produto_info['tipo'],
             float(produto_info['p_venda']),
-            produto_info['desc']
+            produto_info['descricao']
         )
 
         st.divider()
@@ -423,11 +413,9 @@ with aba3:
                     st.session_state.produtos.loc[idx_prod[0], 'margem'] = round((p_venda / float(custo_total_produto)) - 1, 2) if float(custo_total_produto) > 0 else 0
 
                     try:
-                        escrever_tabela_df(
-                            st.session_state.produtos,
-                            "produtos",
-                            renomear={'desc': 'descricao'}
-                        )
+                        escrever_tabela_df(st.session_state.produtos, "produtos")
+                        invalidar_cache("produtos")
+
                     except Exception as e:
                         st.error(f"Erro ao salvar: {str(e)}")
 
@@ -487,8 +475,9 @@ with aba3:
 
                                     try:
                                         escrever_tabela_df(st.session_state.ficha_tecnica, "ficha_tecnica")
+                                        invalidar_cache("ficha_tecnica")
                                         st.success(f"✅ {row['nome']} removido!")
-                                        time.sleep(0.5)
+                                        time.sleep(0.3)
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Erro: {str(e)}")
@@ -508,8 +497,10 @@ with aba3:
 
                             try:
                                 escrever_tabela_df(st.session_state.ficha_tecnica, "ficha_tecnica")
+                                invalidar_cache("ficha_tecnica")
+
                                 st.success(f"✅ Todas as quantidades atualizadas!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Erro: {str(e)}")
@@ -558,8 +549,10 @@ with aba3:
 
                             try:
                                 escrever_tabela_df(st.session_state.ficha_tecnica, "ficha_tecnica")
+                                invalidar_cache("ficha_tecnica")
+
                                 st.success(f"✅ Insumo adicionado!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Erro: {str(e)}")
@@ -612,8 +605,10 @@ with aba4:
 
                     try:
                         escrever_tabela_df(st.session_state.insumos, "insumos")
+                        invalidar_cache("insumos")
+
                         st.success(f"✅ Insumo {novo_nome} adicionado!")
-                        time.sleep(0.5)
+                        time.sleep(0.3)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro: {str(e)}")
@@ -631,8 +626,9 @@ with aba4:
 
                         try:
                             escrever_tabela_df(st.session_state.insumos, "insumos")
+                            invalidar_cache("insumos")
                             st.success(f"✅ Insumo {novo_nome} atualizado!")
-                            time.sleep(0.5)
+                            time.sleep(0.3)
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro: {str(e)}")
@@ -651,8 +647,9 @@ with aba4:
 
                         try:
                             escrever_tabela_df(st.session_state.insumos, "insumos")
+                            invalidar_cache("insumos")
                             st.success(f"✅ Insumo {nome_deletado} excluído!")
-                            time.sleep(0.5)
+                            time.sleep(0.3)
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro: {str(e)}")

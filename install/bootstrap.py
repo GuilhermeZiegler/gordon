@@ -13,10 +13,6 @@ COLUNAS = {
     "ficha_tecnica": ['cod_prod', 'id_insumo', 'quantidade', 'unidade_ficha'],
     "mesas": ['id_mesa', 'status', 'garcom', 'qtd_clientes', 'aberto_em', 'fechado_em', 'valor_pedidos', 'valor_total', 'valor_com_desconto', 'desconto_valor', 'valor_10', 'ticket_medio', 'cover', 'incluir_10'],
     "pedidos": ['id_pedido', 'id_item', 'cod_item', 'id_mesa', 'cod_prod', 'nome_prod', 'quantidade', 'preco_unitario', 'preco_final', 'desconto_tipo', 'desconto_valor', 'subtotal', 'valor_com_desconto', 'observacao', 'criado_em', 'status', 'categoria', 'tipo_venda', 'item_individual', 'origem_venda', 'taxa_entrega', 'taxa_embalagem', 'id_cliente', 'metodo_pagamento'],
-    "estoque": ['id_insumo', 'nome_insumo', 'unidade', 'estoque', 'inventario', 'diferenca', 'a_vencer_7d', 'a_vencer_30d', 'ultima_compra', 'ultimo_inventario'],
-    "compras": ['id_compra', 'id_insumo', 'data_compra', 'data_validade', 'quantidade', 'unidade', 'preco_unitario', 'valor_total', 'fornecedor', 'nota_fiscal'],
-    "estoque_baixas": ['id_baixa', 'id_pedido', 'cod_item', 'cod_prod', 'id_insumo', 'quantidade', 'unidade', 'data_baixa', 'observacao'],
-    "estoque_inventario": ['id_inventario', 'id_insumo', 'data_inventario', 'quantidade_real', 'quantidade_virtual', 'diferenca', 'observacao', 'usuario'],
     "delivery": ['id_pedido', 'id_cliente', 'nome_cliente', 'telefone', 'endereco', 'referencia', 'itens_resumo', 'valor_total', 'taxa_entrega', 'criado_em', 'pronto_em', 'saiu_entrega_em', 'chegou_cliente_em', 'entregue_em', 'motoboy', 'status_entrega', 'latitude', 'longitude'],
     "movimentacoes": ['id_movimentacao', 'tipo', 'id_insumo', 'quantidade', 'unidade', 'data_movimentacao', 'preco_unitario', 'fornecedor', 'nota_fiscal', 'data_validade', 'id_pedido', 'cod_item', 'cod_prod', 'motivo', 'usuario', 'observacao'],
 }

@@ -13,6 +13,8 @@ from utils.staff_utils import (
     garantir_campos_funcionario as _garantir_campos,
 )
 
+from utils.db import invalidar_cache
+
 if 'funcionarios' not in st.session_state:
     st.session_state.funcionarios = [_garantir_campos(f) for f in _carregar()]
 
@@ -163,6 +165,7 @@ if st.session_state.staff_aba == "➕ Cadastrar / Editar":
                     funcionarios[editando] = novo
 
                 _salvar(funcionarios)
+                invalidar_cache("funcionarios")
                 st.session_state.funcionarios = funcionarios
                 st.session_state.editando_funcionario = None
                 st.session_state.staff_aba = "📋 Equipe"
@@ -223,5 +226,7 @@ else:
                         else:
                             del funcionarios[i]
                             _salvar(funcionarios)
+                            invalidar_cache("funcionarios")
+
                             st.session_state.funcionarios = funcionarios
                             st.rerun()

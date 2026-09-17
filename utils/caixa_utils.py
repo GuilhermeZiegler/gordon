@@ -6,6 +6,7 @@ from datetime import datetime
 from utils.db import ler_tabela, escrever_tabela, executar
 from utils.pedidos_utils import gerar_id_pedido, gerar_cod_item, sincronizar_historico_pedido
 from utils.movimentacoes_utils import baixar_por_produto
+from utils.db import ler_tabela_cache
 
 
 _cache_venda = {}
@@ -79,7 +80,7 @@ def salvar_caixa(caixa):
 
 
 def carregar_produtos():
-    return ler_tabela("produtos")
+    return ler_tabela_cache("produtos")
 
 
 def carregar_historico_caixa():

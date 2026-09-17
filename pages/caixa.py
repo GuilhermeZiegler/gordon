@@ -102,13 +102,10 @@ if not caixa_aberto:
 
 else:
 
-    caixa = st.session_state.get("caixa_atual")
-
-    if not caixa:
-        caixa = caixa_atual.copy()
-        st.session_state.caixa_atual = caixa
-
+    caixa = carregar_caixa()
     caixa = garantir_estrutura_caixa(caixa)
+
+    st.session_state.caixa_atual = caixa
 
     aba_resumo, aba_vendas, aba_movimentacoes, aba_fiados = st.tabs(
         [

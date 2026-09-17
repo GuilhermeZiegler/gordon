@@ -30,6 +30,9 @@ def salvar_clientes(clientes):
 
     escrever_tabela("clientes", df)
 
+    from utils.db import invalidar_cache
+    invalidar_cache("clientes")
+
 
 def gerar_id_cliente(clientes=None):
     from utils.db import obter_proximo_id

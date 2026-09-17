@@ -47,11 +47,10 @@ from utils.caixa_utils import carregar_historico_caixa
 
 from pages.configuracoes import carregar_config
 
-if 'mesas' not in st.session_state:
-    st.session_state.mesas = carregar_mesas()
+st.session_state.mesas = carregar_mesas()
 
-    if st.session_state.mesas.empty:
-        st.session_state.mesas = pd.DataFrame(columns=COLUNAS_MESAS)
+if st.session_state.mesas.empty:
+    st.session_state.mesas = pd.DataFrame(columns=COLUNAS_MESAS)
 
 if 'pedidos' not in st.session_state:
     st.session_state.pedidos = carregar_pedidos()
