@@ -1699,20 +1699,16 @@ with aba1:
                                 st.rerun()
 
         else:
-
-            st.info("💤 Nenhuma mesa aberta no momento.")
-            st.caption(
-                "Clique em 'Abrir Mesa' para criar uma nova mesa."
-    )
+            st.info("💤 Nenhuma pedido realizado ")
+    else:        
+         st.caption("Clique em 'Abrir Mesa' para criar uma nova mesa.")
             
 with aba2:
-
     df_historico = st.session_state.mesas[
         st.session_state.mesas['status'] == 'fechada'
     ].copy()
 
     if not df_historico.empty:
-
         total_fechadas = len(df_historico)
 
         valor_total_historico = (
@@ -1913,7 +1909,7 @@ with aba2:
 
     else:
 
-        st.info("💤 Nenhuma servida.")
+        st.info("💤 Nenhuma mesa servida.")
 
 
 with aba3:
