@@ -12,7 +12,7 @@ from utils.clientes_utils import (
     salvar_clientes,
     gerar_id_cliente,
     geocodificar_pendentes,
-    geocodificar_cliente,
+    _tem_coord_valida,
     _garantir_campos,
     _montar_endereco
 )
@@ -530,21 +530,6 @@ with aba_cadastro:
 with aba_mapa:
     st.subheader("🗺️ Mapa de Clientes")
 
-    def _tem_coord_valida(c):
-        try:
-            lat = float(str(c.get('latitude', '') or '').strip())
-            lon = float(str(c.get('longitude', '') or '').strip())
-        except (ValueError, TypeError):
-            return False
-
-        if pd.isna(lat) or pd.isna(lon):
-            return False
-
-        if lat == 0.0 and lon == 0.0:
-            return False
-
-        return True
-
     clientes_com_coord = [c for c in st.session_state.clientes if _tem_coord_valida(c)]
 
     pendentes = [
@@ -559,7 +544,9 @@ with aba_mapa:
 
     st.divider()
 
-    email_contato = st.session_state.get('config', {}).get('empresa', {}).get('email_contato', '').strip()
+    from pages.configuracoes import carregar_config
+    _config = carregar_config()
+    email_contato = _config.get('empresa', {}).get('email_contato', '').strip()
 
     col_btn1, col_btn2 = st.columns([3, 1])
 

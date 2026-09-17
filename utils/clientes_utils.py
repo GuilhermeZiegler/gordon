@@ -197,3 +197,18 @@ def geocodificar_pendentes(email_contato, progresso_callback=None, salvar_cada=5
             pass
 
     return processados
+
+def _tem_coord_valida(c):
+    try:
+        lat = float(str(c.get('latitude', '') or '').strip())
+        lon = float(str(c.get('longitude', '') or '').strip())
+    except (ValueError, TypeError):
+        return False
+
+    if pd.isna(lat) or pd.isna(lon):
+        return False
+
+    if lat == 0.0 and lon == 0.0:
+        return False
+
+    return True
