@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 import time
 from datetime import datetime
 
@@ -529,14 +530,26 @@ with aba_cadastro:
 with aba_mapa:
     st.subheader("🗺️ Mapa de Clientes")
 
-    clientes_com_coord = [
-        c for c in st.session_state.clientes
-        if str(c.get('latitude', '')).strip() and str(c.get('longitude', '')).strip()
-    ]
+    def _tem_coord_valida(c):
+        try:
+            lat = float(str(c.get('latitude', '') or '').strip())
+            lon = float(str(c.get('longitude', '') or '').strip())
+        except (ValueError, TypeError):
+            return False
+
+        if pd.isna(lat) or pd.isna(lon):
+            return False
+
+        if lat == 0.0 and lon == 0.0:
+            return False
+
+        return True
+
+    clientes_com_coord = [c for c in st.session_state.clientes if _tem_coord_valida(c)]
 
     pendentes = [
         c for c in st.session_state.clientes
-        if not str(c.get('latitude', '')).strip() and _montar_endereco(c).strip()
+        if not _tem_coord_valida(c) and _montar_endereco(c).strip()
     ]
 
     col_info1, col_info2, col_info3 = st.columns(3)
