@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import os
-import pickle
 from datetime import datetime
 import time
 
@@ -17,7 +15,6 @@ from utils.caixa_utils import (
     obter_caixa_aberto,
     atualizar_historico_caixa,
     registrar_venda_no_caixa,
-    calcular_saldo_caixa,
     listar_vendas_estornaveis,
     calcular_estornado_venda,
     registrar_estorno,

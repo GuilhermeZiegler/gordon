@@ -3,7 +3,6 @@ import pandas as pd
 import os
 from datetime import datetime
 import time
-import pickle
 
 from components.auth import exigir_permissao
 exigir_permissao("mesas")

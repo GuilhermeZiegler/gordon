@@ -199,6 +199,32 @@ def obter_proximo_id(nome_tabela, coluna_id, prefixo, reiniciar=False):
     return valor
 
 
+def ler_tabela_df(nome, colunas=None, renomear=None):
+    df = ler_tabela(nome)
+
+    if df.empty:
+        return pd.DataFrame(columns=colunas or [])
+
+    if renomear:
+        df = df.rename(columns=renomear)
+
+    if colunas:
+        for col in colunas:
+            if col not in df.columns:
+                df[col] = ''
+
+    return df
+
+
+def escrever_tabela_df(df, nome, renomear=None):
+    df_save = df.copy()
+
+    if renomear:
+        df_save = df_save.rename(columns=renomear)
+
+    escrever_tabela(nome, df_save)
+
+
 def testar_conexao():
     with _engine.connect() as conn:
         return conn.execute(text("SELECT 1")).scalar() == 1

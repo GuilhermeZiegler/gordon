@@ -3,7 +3,6 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta
 import time
-import pickle
 
 from components.auth import exigir_permissao
 exigir_permissao("estoque")
@@ -15,12 +14,10 @@ from utils.movimentacoes_utils import (
     COLUNAS_MOVIMENTACOES,
     MOTIVOS_AJUSTE,
     carregar_movimentacoes,
-    salvar_movimentacoes,
     registrar_compra,
     registrar_ajuste,
     calcular_estoque_atual,
     custo_medio_por_insumo,
-    converter_unidade
 )
 
 _c = get_caminhos()
@@ -108,6 +105,9 @@ def importar_ajustes_excel(df_upload, ids_insumos_validos, usuario):
 
 if 'insumos' not in st.session_state:
     st.session_state.insumos = carregar_pkl(CAMINHO_INSUMOS)
+
+    if st.session_state.insumos is None or st.session_state.insumos.empty:
+        st.session_state.insumos = pd.DataFrame()
 
 if st.session_state.insumos is None or st.session_state.insumos.empty:
     st.session_state.insumos = pd.DataFrame()

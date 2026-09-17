@@ -1,10 +1,8 @@
 import streamlit as st
 import pandas as pd
 import os
-import pickle
 from datetime import datetime
 import time
-import hashlib
 
 from components.auth import exigir_permissao
 exigir_permissao("delivery")
@@ -17,14 +15,12 @@ from utils.print import gerar_ticket_cozinha, salvar_ticket_arquivo, imprimir_ti
 from utils.pedidos_utils import (
     gerar_id_pedido,
     carregar_pkl,
-    salvar_pkl,
     gerar_cod_item,
     carregar_historico_pedidos_hoje,
-    sincronizar_historico_pedido,
     renderizar_seletor_cliente
 )
 from utils.movimentacoes_utils import baixar_por_produto
-from utils.caixa_utils import registrar_venda_no_caixa, carregar_historico_caixa
+from utils.caixa_utils import registrar_venda_no_caixa
 from utils.delivery_utils import criar_registro_delivery, atualizar_status, obter_dados_cliente
 from utils.clientes_utils import geocodificar_cliente
 from components.card_pedidos import (
@@ -37,7 +33,7 @@ _c = get_caminhos()
 CAMINHO_PRODUTOS = _c["produtos"]
 CAMINHO_MESAS = _c["mesas"]
 CAMINHO_PEDIDOS = _c["pedidos"]
-CAMINHO_HISTORICO_PEDIDOS = os.path.join("data", "historico_pedidos.pkl")
+CAMINHO_HISTORICO_PEDIDOS = "historico_pedidos"
 
 os.makedirs(os.path.dirname(CAMINHO_PRODUTOS), exist_ok=True)
 os.makedirs(os.path.dirname(CAMINHO_MESAS), exist_ok=True)
