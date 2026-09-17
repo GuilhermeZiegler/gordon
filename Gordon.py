@@ -2,9 +2,10 @@ import streamlit as st
 from pathlib import Path
 from components.clock import clock
 from components.auth import render_login, usuario_logado, fazer_logout, tem_permissao
-from install.bootstrap import bootstrap
 
-bootstrap()
+# para rodar local
+# from install.bootstrap import bootstrap
+# bootstrap()
 
 st.set_page_config(page_title="Velho Gordon", layout="wide")
 
