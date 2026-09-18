@@ -121,8 +121,10 @@ def gerar_cod_item():
             errors='coerce'
         ).dropna().tolist()
 
+    carrinho = st.session_state.get("pedido_atual") or []
+
     ids_carrinho = pd.to_numeric(
-        pd.Series(st.session_state.pedido_atual)
+        pd.Series(carrinho)
         .apply(lambda x: str(x.get('cod_item', '')).replace('ID_', '')),
         errors='coerce'
     ).dropna().tolist()
