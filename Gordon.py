@@ -16,11 +16,12 @@ if not usuario_logado():
 LOGO = Path(__file__).parent / "images" / "logo.png"
 
 with st.sidebar:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(str(LOGO), width=100)
-    with col2:
-        st.components.v1.html(clock, height=120)
+    st.image(str(LOGO), width=100)
+    # col1, col2 = st.columns(2)
+    # with col1:
+    #     st.image(str(LOGO), width=100)
+    # with col2:
+    #     st.components.v1.html(clock, height=120)
 
     st.divider()
 
