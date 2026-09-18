@@ -109,12 +109,17 @@ def sincronizar_historico_pedido(pedido_historico, caminho_historico=None, colun
 
 
 def gerar_cod_item():
-    ids_existentes = pd.to_numeric(
-        st.session_state.pedidos.get('cod_item', pd.Series(dtype=str))
-        .astype(str)
-        .str.extract(r'ID_(\d+)')[0],
-        errors='coerce'
-    ).dropna().tolist()
+    pedidos = st.session_state.get("pedidos")
+
+    if pedidos is None or pedidos.empty:
+        ids_existentes = []
+    else:
+        ids_existentes = pd.to_numeric(
+            pedidos.get('cod_item', pd.Series(dtype=str))
+            .astype(str)
+            .str.extract(r'ID_(\d+)')[0],
+            errors='coerce'
+        ).dropna().tolist()
 
     ids_carrinho = pd.to_numeric(
         pd.Series(st.session_state.pedido_atual)
